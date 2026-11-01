@@ -72,8 +72,8 @@ _AUTHENTICATORS: Final[dict[str, "Authenticator"]] = {}
 
 
 def configured_accounts() -> list[str]:
-    names = os.getenv("CHATGPT_ACCOUNTS") or DEFAULT_ACCOUNT
-    return [name.strip() for name in names.split(",") if name.strip()]
+    from litellm.proxy.extensions.chatgpt_subscriptions.tokens import configured_accounts as configured
+    return configured()
 
 
 def account_for_api_key(api_key: object) -> str | None:
@@ -120,7 +120,7 @@ class Authenticator:
             )
         if not _ACCOUNT_NAME.fullmatch(account) or account not in configured_accounts():
             raise GetAccessTokenError(
-                message=f"Unknown ChatGPT account {account!r}. Add it to CHATGPT_ACCOUNTS.",
+                message=f"Unknown ChatGPT account {account!r}. Add or reconnect it in ChatGPT subscriptions.",
                 status_code=401,
             )
         authenticator = _AUTHENTICATORS.get(account)
@@ -133,6 +133,9 @@ class Authenticator:
 
     def get_access_token(self) -> str:
         # Subscription authentication: never start a device-code sign-in inside a request.
+        from litellm.proxy.extensions.chatgpt_subscriptions.registry import Registry
+        if Registry().retired(self.account):
+            raise GetAccessTokenError(message="ChatGPT subscription is retired.", status_code=401)
         auth_data: Final = self._read_auth_file()
         if auth_data:
             access_token: Final = _optional_str(auth_data.get("access_token"))
@@ -494,6 +497,9 @@ class Authenticator:
             "id_token": id_token,
         }
         auth_data: Final = self._build_auth_record(refreshed)
+        previous = self._read_auth_file() or {}
+        if previous.get("connection_revision"):
+            auth_data["connection_revision"] = previous["connection_revision"]
         self._write_auth_file(auth_data)
         return refreshed
 

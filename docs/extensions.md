@@ -9,8 +9,10 @@ and are checked again when updating LiteLLM.
 Sign in to the dashboard as a proxy administrator and open **ChatGPT
 subscriptions**. The page uses the existing dashboard session. It shows account
 status, quota windows, assigned deployments and the provider's model catalog.
-Start or cancel a device authorization, refresh an existing connection, or sign
-out from this page. A different account identity requires explicit confirmation
+Choose **Add subscription**, enter a display name, and start its device
+sign-in. Each subscription can be renamed without changing its model selector.
+Start or cancel a device authorization, refresh an existing connection, or
+**Disconnect** from this page. A different account identity requires explicit confirmation
 before replacing an existing connection. The legacy `/chatgpt/ui` URL redirects
 to the integrated page.
 
@@ -19,8 +21,25 @@ connections. Non-administrators cannot use the subscription administration API.
 The page never asks for a second admin key or exposes stored access/refresh
 tokens. Device authorization codes are available only to administrators.
 
-Set `CHATGPT_ACCOUNTS` to comma-separated account aliases, for example
-`default,account-b`. Without this setting, one `default` account is available.
+The dashboard can add subscriptions without server configuration changes.
+`CHATGPT_ACCOUNTS` still imports legacy aliases such as `default,account-b`;
+without this setting, one `default` account is available. Imported aliases remain
+in the durable registry even if removed from this environment setting. Existing
+selectors and token paths remain unchanged. New accounts receive generated
+aliases; their editable display names are separate from immutable IDs.
+
+**Disconnect** removes credentials and stops further requests until sign-in.
+**Retire** also prevents reconnection and retains a read-only historical entry.
+Both confirmations show the currently assigned models. Retirement does not
+silently reassign those models. A request that has already obtained credentials
+may finish; these controls do not cancel an in-flight provider request or revoke
+the provider's grant remotely. Retired entries remain visible under **Retired
+subscriptions**.
+
+Each account keeps an opaque connection revision. Confirming a different provider
+identity changes the revision; token renewal and display-name changes do not.
+Disconnecting preserves the historical revision. The registry and token files
+must be backed up together.
 The image sets `CHATGPT_TOKEN_DIR=/var/lib/litellm/chatgpt`. Mount a persistent
 volume there; the container runs as UID 10001 and must be able to write it.
 Token files use restricted filesystem permissions and contain credentials.

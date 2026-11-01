@@ -31,7 +31,7 @@ class LockTimeout(Exception):
     """Another process keeps the token file locked."""
 
 
-def configured_accounts():
+def legacy_configured_accounts():
     """Account names from CHATGPT_ACCOUNTS; invalid names are skipped."""
     names = []
     for name in (os.getenv("CHATGPT_ACCOUNTS") or DEFAULT_ACCOUNT).split(","):
@@ -43,6 +43,14 @@ def configured_accounts():
         else:
             logger.error("Ignoring invalid ChatGPT account name %r in CHATGPT_ACCOUNTS.", name)
     return names
+
+
+def configured_accounts():
+    """Legacy aliases plus durable dashboard accounts, excluding retired entries."""
+    from .registry import Registry
+    records = Registry().records()
+    return [name for name in dict.fromkeys([*legacy_configured_accounts(), *records])
+            if not records.get(name, {}).get("retired")]
 
 
 def account_for_api_key(api_key):

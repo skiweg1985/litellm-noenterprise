@@ -1,5 +1,6 @@
 import { getProxyBaseUrl } from "@/components/networking";
 import { createApiClient } from "./client";
+import type { components } from "./subscriptions-schema";
 
 export interface SubscriptionIdentity {
   email?: string | null;
@@ -13,14 +14,12 @@ export interface QuotaWindow {
   reset_at: number | null;
 }
 
-export interface SubscriptionAccount extends SubscriptionIdentity {
-  account: string;
-  subscription_id: string;
-  display_name: string;
-  connection_revision: string | null;
-  retired: boolean;
-  state: string;
-  token_valid: boolean;
+type SubscriptionMetadata = Pick<
+  components["schemas"]["SubscriptionDescription"],
+  "account" | "subscription_id" | "display_name" | "connection_revision" | "retired" | "state" | "token_valid"
+>;
+
+export interface SubscriptionAccount extends SubscriptionIdentity, SubscriptionMetadata {
   token_expires_at: number | null;
   last_refresh_at: number | null;
   auto_login: boolean;
@@ -74,7 +73,7 @@ export function createSubscription(accessToken: string, displayName: string) {
   return client.post<SubscriptionAccount>(endpoint, {
     accessToken,
     credentials: "same-origin",
-    body: { display_name: displayName },
+    body: { display_name: displayName } satisfies components["schemas"]["SubscriptionName"],
   });
 }
 
@@ -82,6 +81,6 @@ export function renameSubscription(accessToken: string, name: string, displayNam
   return client.patch<SubscriptionAccount>(`${endpoint}/${encodeURIComponent(name)}`, {
     accessToken,
     credentials: "same-origin",
-    body: { display_name: displayName },
+    body: { display_name: displayName } satisfies components["schemas"]["SubscriptionName"],
   });
 }

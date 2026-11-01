@@ -83,10 +83,10 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
         raise RuntimeError("ChatGPT monitoring route collision.")
     accounts = accounts if accounts is not None else Accounts()
     services = services or {
-        account.name: UsageService(account=account.name, path=account.path) for account in accounts
+        account.name: UsageService(account=account.name, path=account.path, transport=account.transport) for account in accounts
     }
     catalogs = catalogs or {
-        account.name: ModelsService(account=account.name, path=account.path) for account in accounts
+        account.name: ModelsService(account=account.name, path=account.path, transport=account.transport) for account in accounts
     }
     router = APIRouter(dependencies=[Depends(require_key)], tags=["ChatGPT monitoring"])
 
@@ -96,6 +96,7 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
         found = deployments()
         rows = []
         for account in accounts:
+            services.setdefault(account.name, UsageService(account=account.name, path=account.path, transport=account.transport))
             status = account.status()
             own = [d for d in found if d["account"] == account.name and not d["problem"]]
             quota, quota_error = None, None
@@ -117,8 +118,12 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
 
     @router.get(PREFIX)
     async def usage(name: str):
-        if accounts.get(name) is None:
+        account = accounts.get(name)
+        if account is None:
             return JSONResponse({"error": UNKNOWN}, status_code=404, headers={"Cache-Control": "no-store"})
+        if account.retired():
+            raise HTTPException(409, "Subscription is retired.")
+        services.setdefault(name, UsageService(account=name, path=account.path, transport=account.transport))
         try:
             result = await services[name].get()
         except MonitoringError as exc:
@@ -139,6 +144,7 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
         if account is None:
             return JSONResponse({"prtg": {"error": 1, "text": UNKNOWN}}, status_code=404,
                                 headers={"Cache-Control": "no-store"})
+        services.setdefault(name, UsageService(account=name, path=account.path, transport=account.transport))
         status = account.status()
         broken = admin.problems(deployments())
         # Alarm when requests fail now or once the token expires, and while a
