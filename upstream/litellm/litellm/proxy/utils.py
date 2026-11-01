@@ -1424,7 +1424,9 @@ def _failure_fields_to_lift(request_data: Mapping[str, object], provider_billed:
     attribution on failed-request spend logs."""
     _logging_obj: Final = request_data.get("litellm_logging_obj")
     if _logging_obj is None:
-        return _EMPTY_LIFT
+        return MappingProxyType({"_subscription_attribution": {}})
+    from litellm.proxy.extensions.chatgpt_subscriptions.attribution import stamp
+    subscription_fields = stamp(_logging_obj)
     _model_call_details: Final = getattr(_logging_obj, "model_call_details", {})
     _first_handoff: Final = _model_call_details.get("first_api_call_start_time")
     _litellm_params: Final = getattr(_logging_obj, "litellm_params", None)
@@ -1451,6 +1453,7 @@ def _failure_fields_to_lift(request_data: Mapping[str, object], provider_billed:
         else ()
     )
     _entries: Final = (
+        ("_subscription_attribution", subscription_fields),
         ("start_time", _model_call_details.get("start_time")),
         ("first_api_call_start_time", _first_handoff),
         ("call_type", _model_call_details.get("call_type")),

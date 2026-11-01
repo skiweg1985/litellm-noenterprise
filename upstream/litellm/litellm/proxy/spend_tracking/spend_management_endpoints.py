@@ -2550,6 +2550,7 @@ async def ui_view_spend_logs(
         description="Filter logs by model ID (litellm model deployment id)",
     ),
     model_group: str | None = fastapi.Query(default=None, description="Filter logs by model group"),
+    subscription_id: str | None = fastapi.Query(default=None, description="Filter by actual subscription ID"),
     key_alias: str | None = fastapi.Query(default=None, description="Filter logs by key alias"),
     end_user: str | None = fastapi.Query(default=None, description="Filter logs by end user"),
     error_code: str | None = fastapi.Query(default=None, description="Filter logs by error code (e.g., '404', '500')"),
@@ -2729,6 +2730,8 @@ async def ui_view_spend_logs(
 
         # Build metadata filters
         metadata_filters: Final = []
+        if subscription_id is not None:
+            metadata_filters.append({"path": ["subscription_ids"], "array_contains": json.dumps([subscription_id])})
         if key_alias is not None:
             metadata_filters.append(
                 {
@@ -2907,6 +2910,10 @@ async def ui_view_spend_logs(
             p += 1
 
         # Metadata JSON filters (PostgreSQL JSONB operators)
+        if subscription_id is not None:
+            sql_conditions.append(f"metadata->'subscription_ids' @> ${p}::jsonb")
+            sql_params.append(json.dumps([subscription_id]))
+            p += 1
         if key_alias is not None:
             sql_conditions.append(f"metadata->>'user_api_key_alias' LIKE ${p}")
             sql_params.append(f"%{key_alias}%")

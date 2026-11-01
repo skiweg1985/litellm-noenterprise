@@ -3276,6 +3276,9 @@ DERIVED_ROUTING_DECISION_FIELDS: Final[frozenset[str]] = frozenset(
 
 
 class StandardLoggingMetadata(StandardLoggingUserAPIKeyMetadata):
+    subscription_logical_id: NotRequired[str | None]
+    subscription_ids: NotRequired[list[str] | None]
+    subscription_attempts: NotRequired[list[dict] | None]
     """
     Specific metadata k,v pairs logged to integration for easier cost tracking and prompt management
     """

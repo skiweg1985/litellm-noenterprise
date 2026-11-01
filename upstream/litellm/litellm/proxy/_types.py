@@ -4298,6 +4298,9 @@ class SpendLogsRouterMetadata(TypedDict):
 
 
 class SpendLogsMetadata(TypedDict):
+    subscription_logical_id: NotRequired[str | None]
+    subscription_ids: NotRequired[list[str] | None]
+    subscription_attempts: NotRequired[list[dict] | None]
     actor_agent_id: ReadOnly[NotRequired[str | None]]
     target_agent_id: ReadOnly[NotRequired[str | None]]
     billing_agent_id: ReadOnly[NotRequired[str | None]]

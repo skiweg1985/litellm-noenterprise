@@ -3890,6 +3890,9 @@ class ProxyBaseLLMRequestProcessing:
                     client_disconnected,
                 )
             if recorded_client_disconnect:
+                from litellm.proxy.extensions.chatgpt_subscriptions.attribution import cancel, snapshot
+                subscription_logging_obj = request_data.get("litellm_logging_obj")
+                cancel(subscription_logging_obj)
                 deferred_stream_logging_armed: Final = _deferred_stream_logging_is_armed(request_data)
                 ProxyLogging.fire_deferred_stream_logging(request_data)
                 # A disconnect-time success event (the deferred-guardrail flush
@@ -3909,7 +3912,17 @@ class ProxyBaseLLMRequestProcessing:
                     and proxy_logging_obj is not None
                     and user_api_key_dict is not None
                 ):
-                    await proxy_logging_obj.arelease_max_parallel_requests_on_disconnect(user_api_key_dict)
+                    if snapshot(subscription_logging_obj):
+                        # No partial success row owns this request. Persist its
+                        # interrupted attempts through the normal terminal failure
+                        # path, which also releases the request's limiter slot.
+                        await proxy_logging_obj.post_call_failure_hook(
+                            request_data=dict(request_data),
+                            original_exception=HTTPException(status_code=499, detail=_CLIENT_DISCONNECT_DETAIL),
+                            user_api_key_dict=user_api_key_dict,
+                        )
+                    else:
+                        await proxy_logging_obj.arelease_max_parallel_requests_on_disconnect(user_api_key_dict)
 
             if hasattr(response, "aclose"):
                 try:

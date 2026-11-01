@@ -119,7 +119,7 @@ class Recorder(CustomLogger):
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
         entry = kwargs.get("standard_logging_object") or {}
         with open(os.environ["E2E_LOGGED_MODELS"], "a") as handle:
-            handle.write(json.dumps([entry.get("model_id"), entry.get("model")]) + "\\n")
+            handle.write(json.dumps([entry.get("model_id"), entry.get("model"), entry.get("metadata", {})]) + "\\n")
 
 recorder = Recorder()
 """
@@ -187,14 +187,20 @@ def main():
                         statuses == [200] * 4 and "paid" not in seen and set(seen) <= {"default", "team-2"}, (statuses, seen))
 
             time.sleep(2)  # logging runs after the response
-            names = {}
+            names, subscriptions = {}, {}
             for line in logged.read_text().splitlines() if logged.exists() else []:
-                model_id, model = json.loads(line)
+                model_id, model, metadata = json.loads(line)
                 names.setdefault(model_id, set()).add(model)
-            ok &= check("the request log names the subscription in the model",
-                        names.get("sub-default") == {"chatgpt/default/gpt-5.6-sol"}
-                        and names.get("sub-team-2") == {"chatgpt/team-2/gpt-5.6-sol"}
-                        and "chatgpt/" not in str(names.get("paid")), names)
+                for attempt in metadata.get("subscription_attempts", []):
+                    if attempt.get("outcome") == "success":
+                        subscriptions.setdefault(model_id, set()).add(attempt["display_name"])
+                        ok &= check("dispatch has durable subscription identity and revision",
+                                    bool(attempt.get("subscription_id") and attempt.get("connection_revision")))
+            ok &= check("request logs attribute subscriptions without rewriting model names",
+                        subscriptions.get("sub-default") == {"default"}
+                        and subscriptions.get("sub-team-2") == {"team-2"}
+                        and all("/default/" not in model and "/team-2/" not in model
+                                for values in names.values() for model in values), names)
             sys.exit(0 if ok else 1)
         finally:
             proxy.terminate()

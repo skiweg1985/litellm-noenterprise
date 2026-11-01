@@ -2713,6 +2713,12 @@ class BaseLLMHTTPHandler:
             },
         )
 
+        from litellm.proxy.extensions.chatgpt_subscriptions.attribution import begin as begin_subscription_attempt
+        subscription_attempt = begin_subscription_attempt(
+            logging_obj, getattr(litellm_params, "_chatgpt_credential_snapshot", None), model
+        ) if custom_llm_provider == "chatgpt" else None
+        request_context["_chatgpt_subscription_attempt"] = subscription_attempt
+
         try:
             if is_stream_request:
                 response = sync_httpx_client.post(
@@ -2753,17 +2759,28 @@ class BaseLLMHTTPHandler:
                     timeout=timeout or float(response_api_optional_request_params.get("timeout", 0)),
                     **body_kwargs,
                 )
-        except Exception as e:
+        except BaseException as e:
+            if subscription_attempt is not None:
+                subscription_attempt.finish("failure" if isinstance(e, Exception) else "cancelled", error=e)
+            if not isinstance(e, Exception):
+                raise
             raise self._handle_error(
                 e=e,
                 provider_config=responses_api_provider_config,
             )
 
-        initial_response: Final = responses_api_provider_config.transform_response_api_response(
-            model=model,
-            raw_response=response,
-            logging_obj=logging_obj,
-        )
+        try:
+            initial_response: Final = responses_api_provider_config.transform_response_api_response(
+                model=model,
+                raw_response=response,
+                logging_obj=logging_obj,
+            )
+        except Exception as e:
+            if subscription_attempt is not None:
+                subscription_attempt.finish("failure", error=e)
+            raise
+        if subscription_attempt is not None:
+            subscription_attempt.finish("success", response=initial_response)
 
         if self._has_agentic_completion_hook(logging_obj):
             agentic_kwargs: Final = dict(litellm_params)
@@ -2907,6 +2924,12 @@ class BaseLLMHTTPHandler:
             },
         )
 
+        from litellm.proxy.extensions.chatgpt_subscriptions.attribution import begin as begin_subscription_attempt
+        subscription_attempt = begin_subscription_attempt(
+            logging_obj, getattr(litellm_params, "_chatgpt_credential_snapshot", None), model
+        ) if custom_llm_provider == "chatgpt" else None
+        request_context["_chatgpt_subscription_attempt"] = subscription_attempt
+
         try:
             if is_stream_request:
                 response = await async_httpx_client.post(
@@ -2951,17 +2974,28 @@ class BaseLLMHTTPHandler:
                     **body_kwargs,
                 )
 
-        except Exception as e:
+        except BaseException as e:
+            if subscription_attempt is not None:
+                subscription_attempt.finish("failure" if isinstance(e, Exception) else "cancelled", error=e)
+            if not isinstance(e, Exception):
+                raise
             raise self._handle_error(
                 e=e,
                 provider_config=responses_api_provider_config,
             )
 
-        initial_response: Final = responses_api_provider_config.transform_response_api_response(
-            model=model,
-            raw_response=response,
-            logging_obj=logging_obj,
-        )
+        try:
+            initial_response: Final = responses_api_provider_config.transform_response_api_response(
+                model=model,
+                raw_response=response,
+                logging_obj=logging_obj,
+            )
+        except Exception as e:
+            if subscription_attempt is not None:
+                subscription_attempt.finish("failure", error=e)
+            raise
+        if subscription_attempt is not None:
+            subscription_attempt.finish("success", response=initial_response)
 
         agentic_kwargs: Final = dict(litellm_params)
         final_response: Final = await self._call_agentic_completion_hooks(
