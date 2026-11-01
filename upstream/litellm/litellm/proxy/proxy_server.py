@@ -1495,6 +1495,10 @@ async def proxy_startup_event(app: FastAPI) -> AsyncGenerator[ProxyLifespanState
             )
         )
 
+    from litellm.proxy.auth.oidc_identity import validate_configuration as validate_oidc_identity
+
+    validate_oidc_identity()
+
     await migrate_if_requested(
         environ=os.environ,
         master_key=master_key,
@@ -20690,6 +20694,8 @@ app.include_router(password_management_router)
 app.include_router(session_management_router)
 app.include_router(team_router)
 app.include_router(ui_sso_router)
+from litellm.proxy.auth.oidc_identity import router as oidc_identity_router
+app.include_router(oidc_identity_router)
 app.include_router(organization_router)
 app.include_router(customer_router)
 app.include_router(management_v1_router)

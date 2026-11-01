@@ -16,7 +16,7 @@ that takes no body cannot be aimed at other keys.
 
 from typing import TYPE_CHECKING, Annotated, Final, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import TypeAdapter
 
 from litellm._logging import verbose_proxy_logger
@@ -119,6 +119,7 @@ async def revoke_ui_session_keys(
     tags=("UI Session",),
 )
 async def session_logout(
+    request: Request,
     response: Response,
     user_api_key_dict: Annotated[UserAPIKeyAuth, Depends(user_api_key_auth)],
 ) -> SessionLogoutResponse:
@@ -130,6 +131,11 @@ async def session_logout(
     Revokes only the presented session, not the user's other sessions.
     Idempotent: logging out an already-revoked session succeeds.
     """
+    from litellm.proxy.auth.oidc_identity import logout as oidc_logout
+
+    if getattr(request.state, "oidc_browser", False):
+        return await oidc_logout(request)
+
     from litellm.proxy.proxy_server import prisma_client, proxy_logging_obj, user_api_key_cache
 
     if prisma_client is None:

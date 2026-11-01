@@ -7,8 +7,10 @@ is **LiteLLM 1.106.6**.
 ## Status
 
 The reviewed upstream snapshot and independent build tooling are implemented.
-The dashboard is rebuilt from source. Generic identity rules, provider-token API
-access, and personal MCP integration are tracked in
+The dashboard is rebuilt from source. [Generic OIDC browser login](docs/identity.md)
+now supports claim-based admission, stable accounts, ordered role mapping, and
+revocable personal sessions. Provider-token API access and personal MCP
+integration are tracked in
 [the implementation spec](https://github.com/skiweg1985/litellm-noenterprise/issues/2).
 Existing eligible upstream functions should be reused before adding new ones.
 
@@ -35,5 +37,5 @@ Track work in [GitHub Issues](https://github.com/skiweg1985/litellm-noenterprise
 Changes reach protected `main` through pull requests; branch conventions are in
 [AGENTS.md](AGENTS.md#git-workflow). Preserve vendor ancestry with merge commits.
 
-Next: integrate configurable OIDC identity and API access, then extend the
+Next: integrate provider-token API access, then extend the
 existing personal MCP workflow to the agreed permission and connection models.

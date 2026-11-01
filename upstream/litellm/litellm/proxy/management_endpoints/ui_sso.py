@@ -1027,6 +1027,11 @@ async def google_login(
         user_custom_ui_sso_sign_in_handler,
     )
 
+    from litellm.proxy.auth.oidc_identity import begin_login, settings as oidc_settings
+
+    if oidc_settings() is not None:
+        return await begin_login(request)
+
     microsoft_client_id: Final = os.getenv("MICROSOFT_CLIENT_ID", None)
     google_client_id: Final = os.getenv("GOOGLE_CLIENT_ID", None)
     generic_client_id: Final = os.getenv("GENERIC_CLIENT_ID", None)
