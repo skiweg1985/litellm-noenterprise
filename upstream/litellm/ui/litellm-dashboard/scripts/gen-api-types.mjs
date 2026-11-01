@@ -22,9 +22,11 @@ const repoRoot = resolve(dashboardDir, "..", "..");
 // only the personal connection contract is consumed by this distribution.
 const personalMcp = process.argv.includes("--personal-mcp");
 const subscriptions = process.argv.includes("--subscriptions");
+const subscriptionLogs = process.argv.includes("--subscription-logs");
 let outputFile = "schema.d.ts";
 if (personalMcp) outputFile = "personal-mcp-schema.d.ts";
 if (subscriptions) outputFile = "subscriptions-schema.d.ts";
+if (subscriptionLogs) outputFile = "subscription-logs-schema.d.ts";
 const outPath = join(dashboardDir, "src", "lib", "http", outputFile);
 const specDir = mkdtempSync(join(tmpdir(), "litellm-openapi-"));
 const specPath = join(specDir, "openapi.json");
@@ -39,7 +41,46 @@ const python = (process.env.LITELLM_PYTHON ?? "python3").split(" ");
 // across CI and contributors. inspect.cleandoc normalizes every description to one
 // canonical form regardless of interpreter, so the generated file is stable.
 let dumpSpec;
-if (subscriptions) {
+if (subscriptionLogs) {
+  dumpSpec = [
+      "import inspect, json, sys",
+      "from fastapi import FastAPI",
+      "from pydantic import TypeAdapter",
+      "from litellm.proxy.spend_tracking.spend_management_endpoints import router",
+      "from litellm.types.proxy.subscription_attribution import SubscriptionAttributionMetadata",
+      "app = FastAPI()",
+      "for route in router.routes:",
+      "    if route.path == '/spend/logs/ui':",
+      "        route.include_in_schema = True",
+      "        app.router.routes.append(route)",
+      "spec = app.openapi()",
+      "metadata = TypeAdapter(SubscriptionAttributionMetadata).json_schema(ref_template='#/components/schemas/{model}')",
+      "spec['components']['schemas'].update(metadata.pop('$defs', {}))",
+      "spec['components']['schemas']['SubscriptionAttributionMetadata'] = metadata",
+      "spec['paths'] = {'/spend/logs/ui': spec['paths']['/spend/logs/ui']}",
+      "schemas = spec['components']['schemas']",
+      "selected = {}",
+      "def collect(node):",
+      "    if isinstance(node, dict):",
+      "        ref = node.get('$ref', '')",
+      "        if ref.startswith('#/components/schemas/'):",
+      "            name = ref.rsplit('/', 1)[-1]",
+      "            if name not in selected:",
+      "                selected[name] = schemas[name]",
+      "                collect(schemas[name])",
+      "        for value in node.values(): collect(value)",
+      "    elif isinstance(node, list):",
+      "        for value in node: collect(value)",
+      "collect(spec['paths'])",
+      "collect({'$ref': '#/components/schemas/SubscriptionAttributionMetadata'})",
+      "spec['components']['schemas'] = selected",
+      "def normalize(node):",
+      "    if isinstance(node, dict): return {k: inspect.cleandoc(v) if k == 'description' and isinstance(v, str) else normalize(v) for k, v in node.items()}",
+      "    if isinstance(node, list): return [normalize(v) for v in node]",
+      "    return node",
+      "with open(sys.argv[1], 'w') as f: json.dump(normalize(spec), f, sort_keys=True)",
+    ].join("\n");
+} else if (subscriptions) {
   dumpSpec = [
       "import json, os, sys, tempfile",
       "from fastapi import FastAPI",
