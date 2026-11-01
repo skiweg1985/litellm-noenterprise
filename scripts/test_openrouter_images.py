@@ -91,12 +91,12 @@ litellm_settings:
                            env={**os.environ, "IMAGE_PROXY_URL": base}, check=True)
             observed = docker("exec", prefix + "-proxy", "python", "-c", "import urllib.request; print(urllib.request.urlopen('http://provider:8080/control').read().decode())")
             seen = json.loads(observed.stdout)["seen"]
-            assert len(seen) == 3, "Expected one API and two browser generations"
+            assert len(seen) == 4, "Expected one API and three browser generations"
             assert seen[0]["body"] == {"model": "openai/gpt-image-2.5-sunburst", "prompt": "Synthetic API image", "size": "1024x1024", "quality": "high", "n": 1}, seen[0]
-            for record, format in zip(seen[1:], ("png", "jpeg")):
+            for record, format in zip(seen[1:], ("png", "jpeg", "svg")):
                 assert record["body"] == {"model": "openai/gpt-image-2.5-sunburst", "prompt": "Synthetic browser image " + format}, record
             logs = docker("logs", prefix + "-proxy")
-            assert not any(marker in logs.stdout + logs.stderr for marker in ("fixture-image-provider-sentinel", "iVBORw0KGgoAAAANSUhEUg", "/9j/4AAQSkZJRg")), "Credential or image data appeared in proxy logs"
+            assert not any(marker in logs.stdout + logs.stderr for marker in ("fixture-image-provider-sentinel", "iVBORw0KGgoAAAANSUhEUg", "/9j/4AAQSkZJRg", "PHN2ZyB4bWxucz0")), "Credential or image data appeared in proxy logs"
             print("PASS: named credential, native image request/response/cost, decoded Playground image, no credential/image diagnostic leakage")
         finally:
             for name in reversed(containers):

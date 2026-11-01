@@ -245,7 +245,7 @@ The buffered response contains base64 images (`response_format=b64_json`, also t
 default). Hosted-URL responses, editing/reference images, and streaming previews
 are outside this adapter's scope. Image media types are preserved in
 `data[].provider_specific_fields.media_type`; the Playground displays PNG, JPEG,
-and WebP and retains the PNG fallback for providers without media metadata.
+WebP, and SVG and retains the PNG fallback for providers without media metadata.
 Provider-reported cost is retained. Token usage is reported only when the provider
 supplies the counts; per-image cost is not converted into invented token usage.
 
@@ -278,7 +278,7 @@ python3 scripts/test_identity.py litellm-noenterprise:1.106.6
 
 The OpenRouter browser check requires the pinned Playwright dependencies in
 `upstream/litellm/tests/e2e/ui` and exercises the public proxy API, named credential resolution, and
-PNG/JPEG rendering with a controlled provider fixture.
+PNG/JPEG/SVG rendering with a controlled provider fixture.
 
 Extension checks run installed code with synthetic accounts and local mock
 services. They require no real subscription, deployment credentials or external

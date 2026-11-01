@@ -47,7 +47,7 @@ export async function makeOpenAIImageGenerationRequest(
           provider_specific_fields?: { media_type?: string };
         };
         const reportedType = image.provider_specific_fields?.media_type;
-        const mediaType = reportedType && ["image/png", "image/jpeg", "image/webp"].includes(reportedType)
+        const mediaType = reportedType && ["image/png", "image/jpeg", "image/webp", "image/svg+xml"].includes(reportedType)
           ? reportedType
           : "image/png";
         updateUI(`data:${mediaType};base64,${base64Data}`, selectedModel);
