@@ -89,6 +89,16 @@ class Account:
             state.update(changes)
             tokens.write(state, self.state_path)
 
+    def mark_provider_rejected(self, dispatched_fingerprint):
+        """Reject only the credential generation that actually failed upstream."""
+        with tokens.locked(self.registry_path), tokens.locked(self.path):
+            record = tokens.read(self.path) or {}
+            fingerprint = _fingerprint(record.get("access_token"))
+            if not fingerprint or fingerprint != dispatched_fingerprint:
+                return False
+            self._update(provider_rejected_fingerprint=fingerprint)
+            return True
+
     def _fail(self, code, message):
         self._update(error={"code": code, "message": message, "at": self.clock()})
 

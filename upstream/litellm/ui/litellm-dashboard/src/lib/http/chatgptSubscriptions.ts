@@ -85,3 +85,10 @@ export function renameSubscription(accessToken: string, name: string, displayNam
     body: { display_name: displayName } satisfies components["schemas"]["SubscriptionName"],
   });
 }
+
+export function getSubscriptionAvailability(accessToken: string, modelId: string, signal?: AbortSignal) {
+  return client.get<components["schemas"]["ModelAvailability"]>(
+    `/chatgpt/api/models/${encodeURIComponent(modelId)}/availability`,
+    { accessToken, credentials: "same-origin", signal },
+  );
+}

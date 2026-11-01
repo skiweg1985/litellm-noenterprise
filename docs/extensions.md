@@ -85,6 +85,11 @@ renewed; request handling never starts a sign-in. Expired credentials that can b
 refreshed remain eligible. If no member is eligible, reconnect an account or wait
 for its cooldown. Native cooldown sharing between workers uses the configured
 Redis cache; without Redis, cooldown memory remains local to each worker.
+The model details show connection and cooldown eligibility for the saved
+assignment, with a refresh action and the observation's cache scope. A connected
+account is not a guarantee that a request can run; request limits are checked at
+use. Disconnect and retire confirmations list every assigned model, including
+models where the account is a reserve or distribution member.
 
 The existing stream boundary is preserved. An initial HTTP failure may select a
 reserve before streaming starts. Once lifecycle frames or generated content have

@@ -7932,6 +7932,8 @@ class Router:
                     _fallback_metadata["original_model_group"] = model_group
         include_fallback_errors: Final = kwargs.get("include_fallback_errors", False) is True
         from litellm.proxy.extensions.chatgpt_subscriptions.routing import fixed_subscription_group
+        from litellm.proxy.extensions.chatgpt_subscriptions.expansion import hydrate_missing_parent
+        await hydrate_missing_parent(self, model_group)
         requested_disable_fallbacks = kwargs.pop("disable_fallbacks", False)
         disable_fallbacks: Final[bool | None] = fixed_subscription_group(self, model_group) or requested_disable_fallbacks
         record_disable_fallbacks(kwargs, disable_fallbacks is True)

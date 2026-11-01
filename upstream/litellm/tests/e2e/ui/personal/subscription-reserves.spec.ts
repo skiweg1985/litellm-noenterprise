@@ -73,7 +73,24 @@ test("administrators create and reorder a preferred subscription with reserves i
     await expect(members.nth(1)).toContainText(accounts[0].display_name);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ animations: "disabled", path: testInfo.outputPath("subscription-reserve-order.png") });
+    await request.post("http://127.0.0.1:8091/control", { data: { status: 429, clear: true } });
+    expect((await api("/v1/responses", "POST", { model: modelName, input: "All reserves cooling" })).status).toBe(429);
+    await page.reload();
+    const routing = page.getByRole("region", { name: "Saved model routing availability", exact: true });
+    await expect(routing.getByRole("status")).toContainText("No assigned subscription is currently eligible");
+    await expect(routing.getByText(/Cooling down/)).toHaveCount(2);
+    await expect(routing.getByText(/This worker only/)).toBeVisible();
+    await page.goto("/ui/chatgpt-subscriptions/");
+    // The original primary is now the secondary member after reordering.
+    const secondary = page.getByRole("region", { name: `Subscription ${accounts[0].display_name}`, exact: true });
+    for (const action of ["Disconnect", "Retire subscription"]) {
+      await secondary.getByRole("button", { name: action, exact: true }).click();
+      await expect(page.getByRole("region", { name: "Affected models", exact: true })).toContainText(modelName);
+      await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+    }
+
   } finally {
+    await request.post("http://127.0.0.1:8091/control", { data: { status: 200, statuses: [], status_by_identity: {} } });
     if (modelId) expect((await api("/model/delete", "POST", { id: modelId })).status).toBe(200);
     for (const account of accounts) expect((await api(`/chatgpt/api/accounts/${account.account}/retire`, "POST")).status).toBe(200);
   }

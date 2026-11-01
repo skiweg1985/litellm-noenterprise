@@ -74,7 +74,7 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
     @router.get(OVERVIEW)
     async def overview():
         """Master data and quota of every subscription, for the cost dashboard."""
-        found = deployments()
+        found = await admin.deployment_snapshot(deployments)
         rows = []
         for account in accounts:
             services.setdefault(account.name, UsageService(account=account.name, path=account.path, transport=account.transport))
@@ -127,7 +127,7 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
                                 headers={"Cache-Control": "no-store"})
         services.setdefault(name, UsageService(account=name, path=account.path, transport=account.transport))
         status = account.status()
-        broken = admin.problems(deployments())
+        broken = admin.problems(await admin.deployment_snapshot(deployments))
         # Alarm when requests fail now or once the token expires, and while a
         # sign-in with a different account waits for an admin.
         if broken:

@@ -41,8 +41,7 @@ def is_subscription_model(params):
 
 
 def require_subscription_admin(auth):
-    if getattr(auth, 'oidc_identity_source', None) == 'provider' or getattr(auth, 'user_role', None) != 'proxy_admin':
-        raise HTTPException(403, 'Use a proxy administrator dashboard session or native admin key to assign subscriptions.')
+    return admin.require_admin_identity(auth)
 
 
 async def validate_model_assignment(incoming, auth, existing=None, router=None):

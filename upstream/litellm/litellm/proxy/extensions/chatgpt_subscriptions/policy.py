@@ -100,8 +100,7 @@ async def record_failure(router, kwargs, error):
         cooldown_time=cooldown,
     )
     if code in (401, 403):
-        from . import tokens
-        from .accounts import Accounts, _fingerprint
+        from .accounts import Accounts
 
         accounts = Accounts()
         account = next(
@@ -113,14 +112,7 @@ async def record_failure(router, kwargs, error):
             None,
         )
         if account is not None:
-            with (
-                tokens.locked(accounts.registry.lock_path),
-                tokens.locked(account.path),
-            ):
-                record = tokens.read(account.path) or {}
-                fingerprint = _fingerprint(record.get("access_token"))
-                if fingerprint and fingerprint == getattr(
-                    logging_obj, "_subscription_credential_fingerprint", None
-                ):
-                    account._update(provider_rejected_fingerprint=fingerprint)
+            account.mark_provider_rejected(
+                getattr(logging_obj, "_subscription_credential_fingerprint", None)
+            )
     return True

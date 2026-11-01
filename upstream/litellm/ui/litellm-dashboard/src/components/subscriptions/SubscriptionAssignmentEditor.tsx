@@ -110,7 +110,7 @@ export function SubscriptionAssignmentEditor({
                       {value.mode === "priority" ? `${index + 1}. ` : ""}
                       {name}
                     </p>
-                    <p className="text-muted-foreground">{problem || "Ready"}</p>
+                    <p className="text-muted-foreground">{problem || "Connected; routing availability is checked per model"}</p>
                     {!disabled && (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {value.mode === "priority" && (
