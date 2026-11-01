@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import subprocess
 import tempfile
 import time
@@ -11,6 +12,8 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("image", default="litellm-noenterprise:baseline", nargs="?")
+parser.add_argument("--browser", action="store_true", help="Run the personal UI browser journeys on loopback ports 4000, 8080, 8090")
+parser.add_argument("--browser-admin-disabled", action="store_true")
 parser.add_argument("--reject-missing-master", action="store_true")
 parser.add_argument("--reject-invalid-api", action="store_true")
 parser.add_argument("--test-pattern", default="test*.py")
@@ -135,6 +138,8 @@ general_settings:
     default_role: internal_user_viewer
 """)
     value = config.read_text().replace("api://litellm-api/access", args.api_scope_name)
+    if args.browser:
+        value = value.replace("    mcp_access_rules:\n", "    mcp_access_rules:\n      delegate: {claim: roles, any_of: [mcp-delegate]}\n")
     value = value.replace(
         "token_value: access", "token_value: " + json.dumps(args.api_token_scope)
     )
@@ -196,6 +201,7 @@ general_settings:
         mount = ["--mount", f"type=bind,src={root},dst=/work,readonly"]
         run(
             "mcp-upstream",
+            *(["-p", "127.0.0.1:8090:8090"] if args.browser else []),
             *mount,
             "--entrypoint",
             "python",
@@ -204,6 +210,7 @@ general_settings:
         )
         run(
             "issuer",
+            *(["-p", "127.0.0.1:8080:8080"] if args.browser else []),
             *mount,
             "--entrypoint",
             "python",
@@ -215,8 +222,10 @@ general_settings:
         )
         run(
             "proxy",
+            *(["-p", "127.0.0.1:4000:4000"] if args.browser else []),
             *mount,
             *source_env,
+            *(["-e", "DISABLE_ADMIN_UI=true"] if args.browser_admin_disabled else []),
             "--mount",
             f"type=bind,src={config},dst=/test/config.yaml,readonly",
             "-e",
@@ -272,6 +281,15 @@ general_settings:
             time.sleep(1)
         else:
             raise RuntimeError("proxy did not become ready")
+        if args.browser:
+            ui = root / "upstream/litellm/tests/e2e/ui"
+            subprocess.run(
+                [str(ui / "node_modules/.bin/playwright"), "test", "--config", "playwright.personal.config.ts"],
+                cwd=ui,
+                env={**os.environ, "UI_ADMIN_DISABLED": str(args.browser_admin_disabled).lower()},
+                check=True,
+            )
+            raise SystemExit(0)
         result = docker(
             "run",
             "--rm",
