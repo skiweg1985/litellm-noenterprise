@@ -20731,6 +20731,11 @@ app.include_router(user_agent_analytics_router)
 app.include_router(gateway_request_router)
 app.include_router(enterprise_router)
 app.include_router(ui_discovery_endpoints_router)
+
+# Independent, administrator-only subscription management.
+from litellm.proxy.extensions.chatgpt_subscriptions.routes import register as register_chatgpt_subscriptions
+
+register_chatgpt_subscriptions(app)
 app.include_router(agent_skills_discovery_router)
 # Eager: /models/{name}:method overlaps with the OpenAI /models endpoint.
 app.include_router(google_router)

@@ -1,6 +1,11 @@
 import base64
+import contextlib
+import fcntl
 import json
 import os
+import re
+import tempfile
+import threading
 import time
 from collections.abc import Mapping
 from typing import Final, TypeAlias
@@ -35,6 +40,11 @@ DEVICE_CODE_POLL_SLEEP_SECONDS: Final = 5
 
 OPENAI_AUTH_CLAIM_KEY: Final = "https://api.openai.com/auth"
 
+# Subscription authentication: lock bookkeeping per thread; rejected refresh tokens per file.
+_AUTH_LOCKS: Final = threading.local()
+_REJECTED_REFRESH: Final[dict[str, str]] = {}
+AUTH_LOCK_TIMEOUT_SECONDS: Final = 30
+
 JsonObject: TypeAlias = Mapping[str, JsonValue]
 
 _JSON_OBJECT_ADAPTER: Final = TypeAdapter(JsonObject)
@@ -52,52 +62,89 @@ def _token_refresh_timeout() -> httpx.Timeout:
     return httpx.Timeout(seconds, connect=HTTP_HANDLER_CONNECT_TIMEOUT_SECONDS)
 
 
+# Subscription authentication: several subscriptions, one token file each. A deployment
+# picks one with api_key "chatgpt-account:<name>", usually from a LiteLLM
+# credential. Same layout as litellm/proxy/extensions/chatgpt_subscriptions/tokens.py.
+ACCOUNT_KEY_PREFIX: Final = "chatgpt-account:"
+DEFAULT_ACCOUNT: Final = "default"
+_ACCOUNT_NAME: Final = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
+_AUTHENTICATORS: Final[dict[str, "Authenticator"]] = {}
+
+
+def configured_accounts() -> list[str]:
+    names = os.getenv("CHATGPT_ACCOUNTS") or DEFAULT_ACCOUNT
+    return [name.strip() for name in names.split(",") if name.strip()]
+
+
+def account_for_api_key(api_key: object) -> str | None:
+    if isinstance(api_key, str) and api_key.startswith(ACCOUNT_KEY_PREFIX):
+        return api_key[len(ACCOUNT_KEY_PREFIX):]
+    return None
+
+
 class Authenticator:
-    def __init__(self) -> None:
-        self.token_dir = os.getenv(
+    def __init__(self, account: str = DEFAULT_ACCOUNT) -> None:
+        # Subscription authentication: the default account keeps the original path.
+        if not _ACCOUNT_NAME.fullmatch(account):
+            raise ValueError(f"Invalid ChatGPT account name: {account!r}")
+        self.account = account
+        base_dir = os.getenv(
             "CHATGPT_TOKEN_DIR",
             os.path.expanduser("~/.config/litellm/chatgpt"),
         )
+        if account == DEFAULT_ACCOUNT:
+            self.token_dir = base_dir
+        else:
+            self.token_dir = os.path.join(base_dir, "accounts", account)
         self.auth_file = os.path.join(self.token_dir, os.getenv("CHATGPT_AUTH_FILE", "auth.json"))
         self._ensure_token_dir()
+
+    @classmethod
+    def for_request(cls, litellm_params: object = None, api_key: object = None) -> "Authenticator":
+        # Subscription authentication: the authenticator of the deployment's subscription.
+        if api_key is None:
+            if isinstance(litellm_params, Mapping):
+                api_key = litellm_params.get("api_key")
+            else:
+                api_key = getattr(litellm_params, "api_key", None)
+        account: Final = account_for_api_key(api_key)
+        if account is None:
+            # A missing or mistyped credential must not fall back to a
+            # subscription someone else signed in to.
+            raise GetAccessTokenError(
+                message=(
+                    "No ChatGPT subscription for this deployment. Reference a credential "
+                    "with api_key chatgpt-account:<name> via litellm_credential_name."
+                ),
+                status_code=401,
+            )
+        if not _ACCOUNT_NAME.fullmatch(account) or account not in configured_accounts():
+            raise GetAccessTokenError(
+                message=f"Unknown ChatGPT account {account!r}. Add it to CHATGPT_ACCOUNTS.",
+                status_code=401,
+            )
+        authenticator = _AUTHENTICATORS.get(account)
+        if authenticator is None:
+            authenticator = _AUTHENTICATORS.setdefault(account, cls(account))
+        return authenticator
 
     def get_api_base(self) -> str:
         return os.getenv("CHATGPT_API_BASE") or os.getenv("OPENAI_CHATGPT_API_BASE") or CHATGPT_API_BASE
 
     def get_access_token(self) -> str:
+        # Subscription authentication: never start a device-code sign-in inside a request.
         auth_data: Final = self._read_auth_file()
         if auth_data:
             access_token: Final = _optional_str(auth_data.get("access_token"))
             if access_token and not self._is_token_expired(auth_data, access_token):
                 return access_token
-            refresh_token: Final = _optional_str(auth_data.get("refresh_token"))
-            if refresh_token:
-                try:
-                    refreshed: Final = self._refresh_tokens(refresh_token)
-                    return refreshed["access_token"]
-                except RefreshAccessTokenError as exc:
-                    verbose_logger.warning("ChatGPT refresh token failed, re-login required: %s", exc)
-
-        if not can_block_current_thread():
-            raise GetAccessTokenError(
-                message=(
-                    "ChatGPT device-code login needs a human and cannot run inside a running event loop "
-                    "or a worker thread (for example the LiteLLM proxy). Log in once outside the proxy with "
-                    '`python -c "from litellm.llms.chatgpt.authenticator import Authenticator; '
-                    'Authenticator().get_access_token()"` and mount the resulting auth.json into the proxy, '
-                    "or set CHATGPT_TOKEN_DIR to a directory that already holds it."
-                ),
-                status_code=401,
-            )
-
-        cooldown_remaining: Final = self._get_device_code_cooldown_remaining(auth_data)
-        if cooldown_remaining > 0:
-            token: Final = self._wait_for_access_token(cooldown_remaining)
-            if token:
-                return token
-
-        tokens: Final = self._login_device_code()
-        return tokens["access_token"]
+        refreshed: Final = self._refresh_under_lock()
+        if refreshed:
+            return refreshed
+        raise GetAccessTokenError(
+            message="ChatGPT sign-in required. Sign in on /chatgpt/ui of this proxy.",
+            status_code=401,
+        )
 
     def get_account_id(self) -> str | None:
         auth_data: Final = self._read_auth_file()
@@ -110,7 +157,7 @@ class Authenticator:
         access_token: Final = auth_data.get("access_token")
         derived: Final = self._extract_account_id(_optional_str(id_token or access_token))
         if derived:
-            self._write_auth_file({**auth_data, "account_id": derived})
+            self._merge_auth_file(auth_data, {"account_id": derived})  # Subscription authentication
         return derived
 
     def _ensure_token_dir(self) -> None:
@@ -128,11 +175,91 @@ class Authenticator:
             return None
 
     def _write_auth_file(self, data: JsonObject) -> None:
+        # Subscription authentication: replace atomically under the lock.
         try:
-            with open(self.auth_file, "w") as f:
-                json.dump(data, f)
-        except OSError as exc:
+            with self._auth_file_lock():
+                fd, tmp = tempfile.mkstemp(
+                    prefix="." + os.path.basename(self.auth_file) + ".", dir=self.token_dir
+                )
+                try:
+                    with os.fdopen(fd, "w") as f:
+                        json.dump(data, f)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp, self.auth_file)
+                except BaseException:
+                    with contextlib.suppress(OSError):
+                        os.unlink(tmp)
+                    raise
+        except (OSError, GetAccessTokenError) as exc:
             verbose_logger.error("Failed to write ChatGPT auth file: %s", exc)
+
+    @contextlib.contextmanager
+    def _auth_file_lock(self):
+        # Subscription authentication: exclusive flock on "<auth file>.lock", re-entrant per thread.
+        held = getattr(_AUTH_LOCKS, "paths", None)
+        if held is None:
+            held = _AUTH_LOCKS.paths = {}
+        if held.get(self.auth_file):
+            held[self.auth_file] += 1
+            try:
+                yield
+            finally:
+                held[self.auth_file] -= 1
+            return
+        fd = os.open(self.auth_file + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            deadline = time.monotonic() + AUTH_LOCK_TIMEOUT_SECONDS
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise GetAccessTokenError(
+                            message="ChatGPT token file is locked by another process.",
+                            status_code=503,
+                        ) from None
+                    time.sleep(0.05)
+            held[self.auth_file] = 1
+            try:
+                yield
+            finally:
+                held[self.auth_file] = 0
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+    def _refresh_under_lock(self) -> str | None:
+        # Subscription authentication: one refresh at a time; the others reuse its result.
+        with self._auth_file_lock():
+            auth_data = self._read_auth_file()
+            if not auth_data:
+                return None
+            access_token = _optional_str(auth_data.get("access_token"))
+            if access_token and not self._is_token_expired(auth_data, access_token):
+                return access_token
+            refresh_token = _optional_str(auth_data.get("refresh_token"))
+            if not refresh_token or _REJECTED_REFRESH.get(self.auth_file) == refresh_token:
+                return None
+            try:
+                return self._refresh_tokens(refresh_token)["access_token"]
+            except RefreshAccessTokenError as exc:
+                if exc.status_code in (400, 401, 403):
+                    _REJECTED_REFRESH[self.auth_file] = refresh_token
+                verbose_logger.warning("ChatGPT refresh token failed, sign-in required: %s", exc)
+                return None
+
+    def _merge_auth_file(self, seen: JsonObject, changes: dict[str, JsonValue]) -> None:
+        # Subscription authentication: never overwrite tokens that changed in the meantime.
+        try:
+            with self._auth_file_lock():
+                current = self._read_auth_file()
+                if current is None or current.get("access_token") != seen.get("access_token"):
+                    return
+                self._write_auth_file({**current, **changes})
+        except GetAccessTokenError:
+            return
 
     def _is_token_expired(self, auth_data: JsonObject, access_token: str) -> bool:
         stored_expires_at: Final = auth_data.get("expires_at")
@@ -140,7 +267,7 @@ class Authenticator:
             return time.time() >= float(stored_expires_at) - TOKEN_EXPIRY_SKEW_SECONDS
         derived_expires_at: Final = self._get_expires_at(access_token)
         if derived_expires_at:
-            self._write_auth_file({**auth_data, "expires_at": derived_expires_at})
+            self._merge_auth_file(auth_data, {"expires_at": derived_expires_at})  # Subscription authentication
         if derived_expires_at is None:
             return True
         return time.time() >= float(derived_expires_at) - TOKEN_EXPIRY_SKEW_SECONDS
@@ -339,21 +466,26 @@ class Authenticator:
             data: Final = _JSON_OBJECT_ADAPTER.validate_python(resp.json())
         except httpx.HTTPStatusError as exc:
             raise RefreshAccessTokenError(
-                message=f"Refresh token failed: {exc}",
+                message="ChatGPT refresh request was rejected.",
                 status_code=exc.response.status_code,
             )
-        except Exception as exc:
+        except httpx.HTTPError:
             raise RefreshAccessTokenError(
-                message=f"Refresh token failed: {exc}",
-                status_code=400,
-            )
+                message="ChatGPT refresh service is unavailable.",
+                status_code=503,
+            ) from None
+        except Exception:
+            raise RefreshAccessTokenError(
+                message="Invalid response from the ChatGPT refresh service.",
+                status_code=502,
+            ) from None
 
         access_token: Final = _optional_str(data.get("access_token"))
         id_token: Final = _optional_str(data.get("id_token"))
         if not access_token or not id_token:
             raise RefreshAccessTokenError(
-                message=f"Refresh response missing fields: {data}",
-                status_code=400,
+                message="Incomplete response from the ChatGPT refresh service.",
+                status_code=502,
             )
 
         refreshed: Final = {
@@ -393,8 +525,10 @@ class Authenticator:
         return max(0.0, remaining)
 
     def _record_device_code_request(self) -> None:
-        auth_data: Final = self._read_auth_file() or {}
-        self._write_auth_file({**auth_data, "device_code_requested_at": time.time()})
+        # Subscription authentication: read and write under one lock.
+        with self._auth_file_lock():
+            auth_data: Final = self._read_auth_file() or {}
+            self._write_auth_file({**auth_data, "device_code_requested_at": time.time()})
 
     def _wait_for_access_token(self, timeout_seconds: float) -> str | None:
         deadline: Final = time.time() + timeout_seconds

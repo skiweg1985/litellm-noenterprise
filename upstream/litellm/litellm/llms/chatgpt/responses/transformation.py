@@ -54,8 +54,10 @@ class ChatGPTResponsesAPIConfig(OpenAIResponsesAPIConfig):
         model: str,
         litellm_params: GenericLiteLLMParams | None,
     ) -> dict:
+        # Subscription authentication: api_key names the subscription; the token comes from its file.
         try:
-            access_token: Final = self.authenticator.get_access_token()
+            authenticator: Final = Authenticator.for_request(litellm_params)
+            access_token: Final = authenticator.get_access_token()
         except GetAccessTokenError as e:
             raise AuthenticationError(
                 model=model,
@@ -63,7 +65,7 @@ class ChatGPTResponsesAPIConfig(OpenAIResponsesAPIConfig):
                 message=str(e),
             )
 
-        account_id: Final = self.authenticator.get_account_id()
+        account_id: Final = authenticator.get_account_id()
         session_id: Final = ensure_chatgpt_session_id(litellm_params)
         default_headers: Final = get_chatgpt_default_headers(access_token, account_id, session_id)
         return {**default_headers, **headers}
@@ -76,6 +78,8 @@ class ChatGPTResponsesAPIConfig(OpenAIResponsesAPIConfig):
         litellm_params: GenericLiteLLMParams,
         headers: dict,
     ) -> dict:
+        if isinstance(input, str):  # ChatGPT compatibility: the backend only accepts lists
+            input = [{"role": "user", "content": [{"type": "input_text", "text": input}]}]
         request: Final = super().transform_responses_api_request(
             model,
             input,
@@ -245,6 +249,30 @@ class ChatGPTResponsesAPIConfig(OpenAIResponsesAPIConfig):
         )
         hidden_params["additional_headers"] = processed_headers
         hidden_params["headers"] = raw_headers
+
+    def transform_streaming_response(self, model, parsed_chunk, logging_obj):
+        # ChatGPT compatibility: fill an empty output in the final event from the
+        # streamed items. State lives on the per-request logging object because
+        # this config instance is shared between requests.
+        event_type = parsed_chunk.get("type")
+        if event_type == ResponsesAPIStreamEvents.OUTPUT_ITEM_DONE and isinstance(parsed_chunk.get("item"), dict):
+            items = getattr(logging_obj, "_chatgpt_output_items", None)
+            if items is None:
+                items = {}
+                setattr(logging_obj, "_chatgpt_output_items", items)
+            index = parsed_chunk.get("output_index")
+            items[index if isinstance(index, int) else len(items)] = parsed_chunk["item"]
+        elif event_type in (
+            ResponsesAPIStreamEvents.RESPONSE_COMPLETED,
+            ResponsesAPIStreamEvents.RESPONSE_INCOMPLETE,
+        ):
+            response = parsed_chunk.get("response")
+            items = getattr(logging_obj, "_chatgpt_output_items", None)
+            if isinstance(response, dict) and not response.get("output") and items:
+                response["output"] = [item for _, item in sorted(items.items())]
+        return super().transform_streaming_response(
+            model=model, parsed_chunk=parsed_chunk, logging_obj=logging_obj
+        )
 
     def get_complete_url(
         self,

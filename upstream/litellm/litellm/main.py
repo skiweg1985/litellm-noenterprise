@@ -8390,7 +8390,7 @@ def speech(
             client=client,
             _is_async=aspeech or False,
         )
-    elif custom_llm_provider == "openai" or (
+    elif custom_llm_provider == "openai" or custom_llm_provider == "openrouter" or (
         custom_llm_provider in litellm.openai_compatible_providers
         and custom_llm_provider not in AZURE_OPENAI_AUDIO_PROVIDERS
     ):

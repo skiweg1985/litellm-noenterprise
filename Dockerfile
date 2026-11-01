@@ -46,9 +46,12 @@ COPY --from=ui /ui/out/third-party-notices/ /usr/share/licenses/litellm-noenterp
 COPY LICENSE /usr/share/licenses/litellm-noenterprise/LICENSE
 ENV PATH=/opt/venv/bin:$PATH PRISMA_BINARY_CACHE_DIR=/opt/prisma PRISMA_USE_GLOBAL_NODE=1 \
     PRISMA_CLI_PATH=/opt/prisma/node_modules/.bin/prisma PRISMA_OFFLINE_MODE=true \
-    LITELLM_LOCAL_MODEL_COST_MAP=True LITELLM_TELEMETRY=False PYTHONDONTWRITEBYTECODE=1
+    LITELLM_LOCAL_MODEL_COST_MAP=True LITELLM_TELEMETRY=False PYTHONDONTWRITEBYTECODE=1 \
+    CHATGPT_TOKEN_DIR=/var/lib/litellm/chatgpt
 WORKDIR /app
-RUN useradd --uid 10001 --create-home litellm && chown -R 10001:10001 /app /opt/prisma
+RUN useradd --uid 10001 --create-home litellm \
+    && mkdir -p /var/lib/litellm/chatgpt \
+    && chown -R 10001:10001 /app /opt/prisma /var/lib/litellm
 USER 10001
 EXPOSE 4000
 ENTRYPOINT ["litellm"]

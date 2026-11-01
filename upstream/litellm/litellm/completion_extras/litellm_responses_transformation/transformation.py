@@ -1585,6 +1585,8 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
         self._chat_completion_id: str | None = None
         self._served_service_tier: str | None = None
         self._tool_call_index_map: dict[int, int] = {}  # mutable-ok: per-stream accumulator state
+        # Responses stream compatibility: output indexes whose tool-call arguments were already sent
+        self._tool_call_args_emitted: set[int] = set()  # mutable-ok: per-stream accumulator state
 
     def _handle_string_chunk(
         self, str_line: Union[str, "BaseModel"]
@@ -1896,6 +1898,9 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
         """
         verbose_logger.debug("Chat provider: transform_streaming_response called with chunk: %s", chunk)
         self._remember_served_service_tier(chunk)
+        backfill = self._backfill_tool_call_arguments(chunk)
+        if backfill is not None:
+            return self._with_served_service_tier(self._with_stream_scoped_id(backfill))
         return self._with_served_service_tier(
             self._with_stream_scoped_id(
                 OpenAiResponsesToChatCompletionStreamIterator.translate_responses_chunk_to_openai_stream(
@@ -1916,6 +1921,66 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
         if self._served_service_tier is not None and chunk.model_dump().get("service_tier") is None:
             setattr(chunk, "service_tier", self._served_service_tier)  # noqa: B010  # pydantic extra, not a declared field
         return chunk
+
+    def _backfill_tool_call_arguments(self, chunk: dict[str, object]) -> "ModelResponseStream | None":
+        # Responses stream compatibility: send tool-call arguments that never came as deltas.
+        # Returns None to fall through to the normal translation.
+        from litellm.types.llms.openai import ChatCompletionToolCallFunctionChunk
+        from litellm.types.utils import ChatCompletionToolCallChunk, Delta, ModelResponseStream, StreamingChoices
+
+        event_type = chunk.get("type")
+        if isinstance(event_type, ResponsesAPIStreamEvents):
+            event_type = event_type.value
+        output_index = chunk.get("output_index", 0)
+        if not isinstance(output_index, int):
+            return None
+
+        if event_type == ResponsesAPIStreamEvents.OUTPUT_ITEM_ADDED.value:
+            item = chunk.get("item") or {}
+            if isinstance(item, dict) and item.get("type") in ("function_call", "custom_tool_call"):
+                converted = tool_call_dict_from_output_item(item, output_index)
+                if converted["function"]["arguments"] or chunk.get("arguments"):
+                    self._tool_call_args_emitted.add(output_index)
+            return None
+        if event_type in (
+            ResponsesAPIStreamEvents.FUNCTION_CALL_ARGUMENTS_DELTA.value,
+            ResponsesAPIStreamEvents.CUSTOM_TOOL_CALL_INPUT_DELTA.value,
+        ):
+            if chunk.get("delta"):
+                self._tool_call_args_emitted.add(output_index)
+            return None
+
+        arguments = None
+        if event_type == ResponsesAPIStreamEvents.FUNCTION_CALL_ARGUMENTS_DONE.value:
+            arguments = chunk.get("arguments")
+        elif event_type == ResponsesAPIStreamEvents.OUTPUT_ITEM_DONE.value:
+            item = chunk.get("item") or {}
+            if isinstance(item, dict) and item.get("type") in ("function_call", "custom_tool_call"):
+                arguments = tool_call_dict_from_output_item(item, output_index)["function"]["arguments"]
+        if not arguments or not isinstance(arguments, str) or output_index in self._tool_call_args_emitted:
+            return None
+        self._tool_call_args_emitted.add(output_index)
+        tool_call_index = OpenAiResponsesToChatCompletionStreamIterator._sequential_tool_call_index(
+            self._tool_call_index_map, output_index
+        )
+        return ModelResponseStream(
+            choices=[
+                StreamingChoices(
+                    index=0,
+                    delta=Delta(
+                        tool_calls=[
+                            ChatCompletionToolCallChunk(
+                                id=None,
+                                index=tool_call_index,
+                                type="function",
+                                function=ChatCompletionToolCallFunctionChunk(name=None, arguments=arguments),
+                            )
+                        ]
+                    ),
+                    finish_reason=None,
+                )
+            ]
+        )
 
     def _with_stream_scoped_id(self, chunk: "ModelResponseStream") -> "ModelResponseStream":
         if self._chat_completion_id is None:

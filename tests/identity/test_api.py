@@ -200,7 +200,14 @@ class ProviderAPITests(unittest.TestCase):
         session = self.mcp_initialize(alice)
         bob = {**session, "Authorization": "Bearer " + self.token(oid="mcp-bob", roles=["access", "admin"])}
         response, _ = self.mcp_request(bob, "tools/list")
-        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.json()["error"], {"code": -32001, "message": "Session not found"})
+        # Rejection must not delete or transfer the original owner's session.
+        response, _ = self.mcp_request(session, "tools/list")
+        self.assertEqual(response.status_code, 200, response.text)
+        fresh = self.mcp_initialize({"Authorization": bob["Authorization"]})
+        response, _ = self.mcp_request(fresh, "tools/list")
+        self.assertEqual(response.status_code, 200, response.text)
 
     def test_personal_routes_require_user_identity_and_native_workflows_still_work(self):
         for headers in (MASTER, {"Authorization": "Bearer " + self.token()}):
