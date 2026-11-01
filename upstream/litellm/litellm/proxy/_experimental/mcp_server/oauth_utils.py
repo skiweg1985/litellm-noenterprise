@@ -3,7 +3,7 @@
 
 import os
 from ipaddress import ip_address
-from typing import TYPE_CHECKING, Final, NoReturn
+from typing import TYPE_CHECKING, Final, Literal, NoReturn
 from urllib.parse import ParseResult, urlparse, urlsplit, urlunparse, urlunsplit
 
 from fastapi import HTTPException, Request
@@ -19,6 +19,7 @@ from litellm.proxy.auth.ip_address_utils import IPAddressUtils
 from litellm.proxy.middleware.per_request_root_path_middleware import get_request_root_path
 
 if TYPE_CHECKING:
+    from litellm.proxy._experimental.mcp_server.db import OAuthCredentialPayload
     from litellm.types.mcp_server.mcp_server_manager import MCPServer
 
 # RFC 6749 §5.1 / OAuth 2.1 draft-15 §4.1.3: token-endpoint responses
@@ -819,3 +820,76 @@ def build_upstream_oauth2_token_request(
     if not resource:
         return client_auth
     return TokenEndpointClientAuth(headers=client_auth.headers, body={**client_auth.body, "resource": resource})
+
+
+async def revoke_upstream(
+    server: "MCPServer | None", credential: "OAuthCredentialPayload | None"
+) -> Literal["revoked", "unsupported", "failed", "no_credential"]:
+    """Attempt advertised revocation after local deletion; never undo local disconnect."""
+    import httpx
+    from litellm.proxy._experimental.mcp_server.mcp_server_manager import (
+        global_mcp_server_manager,
+    )
+
+    if not credential:
+        return "no_credential"
+    if server is None:
+        return "unsupported"
+    parsed = urlparse(server.effective_token_url or "")
+    issuer = server.issuer or (
+        f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else None
+    )
+    if not issuer:
+        return "unsupported"
+    try:
+        metadata = (
+            await global_mcp_server_manager._fetch_single_authorization_server_metadata(
+                issuer, issuer, require_issuer=issuer
+            )
+        )
+        if metadata is None:
+            return "failed"
+        if not metadata.revocation_url:
+            return "unsupported"
+        target = urlparse(metadata.revocation_url)
+        if (
+            target.scheme not in ("https", "http")
+            or target.username
+            or target.password
+            or not target.hostname
+        ):
+            return "failed"
+        if target.scheme == "http" and urlparse(issuer).scheme != "http":
+            return "failed"
+        auth = build_upstream_oauth2_token_request(
+            server,
+            auth_method=server.token_endpoint_auth_method,
+            client_id=server.client_id,
+            client_secret=server.client_secret,
+        )
+        async with httpx.AsyncClient(
+            timeout=5, trust_env=False, follow_redirects=False
+        ) as client:
+            for kind in ("refresh_token", "access_token"):
+                token = credential.get(kind)
+                if token:
+                    response = await client.post(
+                        metadata.revocation_url,
+                        data={**auth.body, "token": token, "token_type_hint": kind},
+                        headers=auth.headers,
+                    )
+                    response.raise_for_status()
+        return "revoked"
+    except Exception:
+        return "failed"
+
+
+def require_managed_client(server: "MCPServer") -> None:
+    if server.needs_user_oauth_token and not server.client_id:
+        raise HTTPException(
+            400,
+            detail={
+                "error": "oauth_client_required",
+                "message": "Configure an OAuth client ID on this MCP server before connecting a managed account.",
+            },
+        )

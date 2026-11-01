@@ -120,7 +120,9 @@ async def token(request):
     access = "mcp-fixture-access-" + secrets.token_urlsafe(24)
     expiry = grant.get("expires_in", 3600)
     access_tokens[access] = {"actor": grant["actor"], "expires": time.time() + expiry}
-    result = {"access_token": access, "token_type": "Bearer", "expires_in": expiry}
+    result = {"access_token": access, "token_type": "Bearer"}
+    if not grant.get("omit_expires_in"):
+        result["expires_in"] = expiry
     if grant.get("refresh", True):
         refresh = "mcp-fixture-refresh-" + secrets.token_urlsafe(24)
         refresh_tokens[refresh] = grant
@@ -147,6 +149,14 @@ async def revoke_actor(request):
     return JSONResponse({"revoked": True})
 
 
+async def expire_access(request):
+    actor = (await request.json())["actor"]
+    for grant in access_tokens.values():
+        if grant["actor"] == actor:
+            grant["expires"] = 0
+    return JSONResponse({"expired": True})
+
+
 async def wait_refresh(request):
     await asyncio.wait_for(refresh_started.wait(), timeout=20)
     return JSONResponse({"started": True})
@@ -158,6 +168,7 @@ async def release_refresh(request):
 
 
 app.add_route("/control/revoke", revoke_actor, methods=["POST"])
+app.add_route("/control/expire-access", expire_access, methods=["POST"])
 app.add_route("/control/refresh-wait", wait_refresh)
 app.add_route("/control/refresh-release", release_refresh, methods=["POST"])
 app.add_route("/control/oauth", control, methods=["POST"])
@@ -181,7 +192,11 @@ class Capture:
             value = headers.get("authorization", "").removeprefix("Bearer ")
             if value.startswith("mcp-fixture-access-"):
                 grant = access_tokens.get(value)
-                if not grant or grant["expires"] <= time.time():
+                if (
+                    not grant
+                    or grant["expires"] <= time.time()
+                    or grant["actor"] == oauth_actor.get("reject_actor")
+                ):
                     await JSONResponse({"error": "invalid_token"}, status_code=401)(
                         scope, receive, send
                     )

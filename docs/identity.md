@@ -296,8 +296,10 @@ to another user's connection.
 The credential status endpoint reports `connection_mode`, `connection_status`,
 `can_refresh`, and expiry without exposing tokens. Expired grants with a usable
 refresh token remain refreshable. A temporary refresh-service failure denies the
-current call but permits a later retry. An invalid grant or upstream authentication rejection
-requires reconnecting; successful authorization replaces that user's old grant.
+current call but permits a later retry. An upstream authentication rejection triggers
+one coordinated refresh and one request retry, including when expiry metadata was
+not supplied. An invalid refresh grant or rejection of the renewed token requires
+reconnecting; successful authorization replaces that user's old grant.
 Concurrent refresh cannot recreate a disconnected record. Revocation at the
 upstream is detected on use, not pushed to LiteLLM.
 
@@ -336,11 +338,12 @@ checks also cover managed OAuth binding, both credential models, claim-based
 server permissions, refresh/reconnect, logout retention, disconnect races, and
 cold-restart persistence. They do not establish live provider compatibility.
 
-Validation on 2026-11-01 passed 42 public HTTP/MCP journeys against the installed
+Validation on 2026-11-01 passed 43 public HTTP/MCP journeys against the installed
 ARM64 image, followed by a proxy restart and stored-connection verification.
 The suite includes two identities, direct and virtual tool authorization,
 managed OAuth binding, transient and permanent refresh failures, disconnect
-during refresh, upstream rejection, and token-free connection responses.
+during refresh, access-token expiry without metadata, bounded recovery from
+upstream rejection, and token-free connection responses.
 Proxy logs contained none of the fixture credential sentinels. Source and image
 audits and the baseline startup/completion checks also passed.
 

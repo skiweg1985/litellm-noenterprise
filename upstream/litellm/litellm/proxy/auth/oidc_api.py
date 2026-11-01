@@ -101,20 +101,10 @@ async def verify_access_token(config: APISettings, encoded: str) -> dict:
             raise ValueError("unsupported access-token header")
         async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
             metadata = await identity.discovery(browser, client)
-            response = await client.get(metadata["jwks_uri"])
-            response.raise_for_status()
-            keys = [
-                key
-                for key in response.json()["keys"]
-                if key.get("kid") == header.get("kid")
-                and key.get("use", "sig") == "sig"
-                and key.get("alg", algorithm) == algorithm
-            ]
-            if len(keys) != 1:
-                raise ValueError("ambiguous or missing signing key")
+            key = await identity.load_signing_key(client, metadata["jwks_uri"], header, algorithm)
             claims = jwt.decode(
                 encoded,
-                jwt.PyJWK.from_dict(keys[0], algorithm=algorithm).key,
+                key.key,
                 algorithms=[algorithm],
                 audience=config.audience,
                 issuer=browser.issuer,

@@ -2334,7 +2334,7 @@ if MCP_AVAILABLE:
         async with _oauth_server_operation(server_id, user_api_key_dict, request=request) as mcp_server:
             raise_if_not_oauth2(mcp_server)
             if user_api_key_dict.oidc_identity_source:
-                from litellm.proxy._experimental.mcp_server.oidc_policy import require_managed_client
+                from litellm.proxy._experimental.mcp_server.oauth_utils import require_managed_client
 
                 require_managed_client(mcp_server)
             # Use the server's stored client_id when the caller doesn't supply one
@@ -2398,7 +2398,7 @@ if MCP_AVAILABLE:
         async with _oauth_server_operation(server_id, user_api_key_dict, request=request) as mcp_server:
             raise_if_not_oauth2(mcp_server)
             if user_api_key_dict.oidc_identity_source:
-                from litellm.proxy._experimental.mcp_server.oidc_policy import require_managed_client
+                from litellm.proxy._experimental.mcp_server.oauth_utils import require_managed_client
 
                 require_managed_client(mcp_server)
             # Sealed passthrough codes exist only for the authorization_code grant. A refresh_token
@@ -2709,7 +2709,7 @@ if MCP_AVAILABLE:
             )
 
             await global_mcp_server_manager.invalidate_user_oauth_token_cache(target_user_id, server_id)
-        from litellm.proxy._experimental.mcp_server.oidc_policy import revoke_upstream
+        from litellm.proxy._experimental.mcp_server.oauth_utils import revoke_upstream
         from litellm.proxy._experimental.mcp_server.mcp_server_manager import global_mcp_server_manager
 
         revocation = await revoke_upstream(
@@ -2741,11 +2741,11 @@ if MCP_AVAILABLE:
                 detail={"error": "User ID not found in token"},
             )
         if user_api_key_dict.oidc_identity_source:
-            from litellm.proxy._experimental.mcp_server.oidc_policy import credential_status
+            from litellm.proxy._experimental.mcp_server.db import get_user_oauth_credential_status
 
             server = global_mcp_server_manager.get_mcp_server_by_id(server_id)
             if server is not None:
-                return await credential_status(user_id, server)
+                return await get_user_oauth_credential_status(prisma_client, user_id, server)
         cred: Final = await get_user_oauth_credential(prisma_client, user_id, server_id)
         if cred is None:
             return MCPOAuthUserCredentialStatus(server_id=server_id, has_credential=False, is_expired=False)

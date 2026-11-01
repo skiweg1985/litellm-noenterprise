@@ -9,7 +9,8 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://proxy:4000",
-    channel: process.env.UI_BROWSER_CHANNEL,
+    // Full Chromium honors the secure-origin flag required by the HTTP fixtures.
+    channel: process.env.UI_BROWSER_CHANNEL ?? "chromium",
     launchOptions: {
       args: [
         "--host-resolver-rules=MAP proxy 127.0.0.1, MAP issuer 127.0.0.1, MAP mcp-upstream 127.0.0.1",

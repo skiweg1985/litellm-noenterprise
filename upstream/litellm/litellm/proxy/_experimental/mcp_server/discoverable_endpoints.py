@@ -1006,7 +1006,7 @@ async def authorize_with_server(
     if oidc_managed and not getattr(request.state, "oidc_user_id", None):
         raise HTTPException(403, "Managed OAuth requires the authenticated personal connection endpoint")
     if oidc_managed:
-        from litellm.proxy._experimental.mcp_server.oidc_policy import require_managed_client
+        from litellm.proxy._experimental.mcp_server.oauth_utils import require_managed_client
 
         require_managed_client(resolved_server)
     cimd_client_id: Final = get_cimd_client_id(resolved_server)
@@ -1186,7 +1186,7 @@ async def exchange_token_with_server(
     if oidc_managed and not getattr(request.state, "oidc_user_id", None):
         raise HTTPException(403, "Managed OAuth requires the authenticated personal connection endpoint")
     if oidc_managed:
-        from litellm.proxy._experimental.mcp_server.oidc_policy import require_managed_client
+        from litellm.proxy._experimental.mcp_server.oauth_utils import require_managed_client
 
         require_managed_client(resolved_server)
     request_user_id: Final = (
@@ -1411,9 +1411,12 @@ async def exchange_token_with_server(
             server=resolved_server, user_id=request_user_id, token_response=token_response,
             identity_binding_proof=binding_proof, strict=True,
         )
-        from litellm.proxy._experimental.mcp_server.oidc_policy import credential_status
+        from litellm.proxy._experimental.mcp_server.db import get_user_oauth_credential_status
+        from litellm.proxy.utils import get_prisma_client_or_throw
+
+        prisma_client = get_prisma_client_or_throw("Database not connected. Cannot read personal OAuth status.")
         return JSONResponse(
-            (await credential_status(request_user_id, resolved_server)).model_dump(mode="json"),
+            (await get_user_oauth_credential_status(prisma_client, request_user_id, resolved_server)).model_dump(mode="json"),
             headers=TOKEN_NO_CACHE_HEADERS,
         )
 
