@@ -63,7 +63,7 @@ def ledger(logging_obj):
     value = getattr(logging_obj, "_chatgpt_subscription_ledger", None)
     if not isinstance(value, Ledger):
         value = Ledger()
-        setattr(logging_obj, "_chatgpt_subscription_ledger", value)
+        logging_obj._chatgpt_subscription_ledger = value
     return value
 
 
@@ -74,7 +74,9 @@ def begin(logging_obj, credential, model):
     details = logging_obj.model_call_details
     params = details.get("litellm_params") or {}
     metadata = params.get("litellm_metadata") or params.get("metadata") or {}
-    model_id = (metadata.get("model_info") or {}).get("id")
+    model_id = getattr(logging_obj, "_chatgpt_subscription_deployment_id", None)
+    if not isinstance(model_id, str):
+        model_id = (metadata.get("model_info") or {}).get("id")
     previous = state.attempts[-1].value if state.attempts else None
     reason = (
         "initial"
@@ -85,21 +87,21 @@ def begin(logging_obj, credential, model):
             else "retry"
         )
     )
-    value: SubscriptionAttemptRecord = dict(
-        attempt_id=str(uuid4()),
-        sequence=len(state.attempts) + 1,
-        subscription_id=credential.subscription_id,
-        display_name=credential.display_name,
-        connection_revision=credential.connection_revision,
-        model=model,
-        model_id=model_id,
-        started_at=now(),
-        ended_at=None,
-        outcome="incomplete",
-        reason=reason,
-        input_tokens=None,
-        output_tokens=None,
-    )
+    value: SubscriptionAttemptRecord = {
+        "attempt_id": str(uuid4()),
+        "sequence": len(state.attempts) + 1,
+        "subscription_id": credential.subscription_id,
+        "display_name": credential.display_name,
+        "connection_revision": credential.connection_revision,
+        "model": model,
+        "model_id": model_id,
+        "started_at": now(),
+        "ended_at": None,
+        "outcome": "incomplete",
+        "reason": reason,
+        "input_tokens": None,
+        "output_tokens": None,
+    }
     attempt = Attempt(value)
     state.attempts.append(attempt)
     return attempt
