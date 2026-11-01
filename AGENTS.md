@@ -1,3 +1,8 @@
+## Documentation
+
+Write short, factual documentation in English. Keep `README.md` current
+with the project's purpose, implementation status, and next steps.
+
 ## Git workflow
 
 - Start each change on a branch based on the latest `origin/main`.
