@@ -77,6 +77,7 @@ describe("useLogFilterLogic", () => {
 
   describe("column filters map onto backend query params", () => {
     const cases: ReadonlyArray<{ id: string; value: string; param: string }> = [
+      { id: "subscription_id", value: "subscription-1", param: "subscription_id" },
       { id: LOG_FILTER_IDS.KEY_HASH, value: "sk-hash-1", param: "api_key" },
       { id: LOG_FILTER_IDS.TEAM_ID, value: "team-1", param: "team_id" },
       { id: LOG_FILTER_IDS.REQUEST_ID, value: "req-1", param: "request_id" },

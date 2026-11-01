@@ -23,6 +23,7 @@ import {
   useLogFilterLogic,
 } from "./useLogFilterLogic";
 import { useLogDetailRouting } from "./logDetailRouting";
+import { useSubscriptionLogRouting } from "./subscriptionLogRouting";
 import { LogDetailsDrawer } from "../detail";
 import {
   defaultLogsTimeRange,
@@ -49,10 +50,53 @@ interface RequestLogsPanelProps {
 export default function RequestLogsPanel({ accessToken, token, userRole, userID, isActive }: RequestLogsPanelProps) {
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: PAGE_SIZE });
   const [sorting, setSorting] = useState<SortingState>(DEFAULT_LOGS_SORTING);
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [localColumnFilters, setLocalColumnFilters] = useState<ColumnFiltersState>([]);
+  const [subscriptionRoute, setSubscriptionRoute] = useSubscriptionLogRouting();
+  const columnFilters = useMemo<ColumnFiltersState>(
+    () =>
+      subscriptionRoute.subscription_id
+        ? [...localColumnFilters, { id: LOG_FILTER_IDS.SUBSCRIPTION_ID, value: subscriptionRoute.subscription_id }]
+        : localColumnFilters,
+    [localColumnFilters, subscriptionRoute.subscription_id],
+  );
+  const setColumnFilters = useCallback<OnChangeFn<ColumnFiltersState>>(
+    (updater) => {
+      const next = typeof updater === "function" ? updater(columnFilters) : updater;
+      setLocalColumnFilters(next.filter((filter) => filter.id !== LOG_FILTER_IDS.SUBSCRIPTION_ID));
+      const subscription = next.find((filter) => filter.id === LOG_FILTER_IDS.SUBSCRIPTION_ID)?.value;
+      void setSubscriptionRoute({
+        subscription_id: typeof subscription === "string" && subscription !== "" ? subscription : null,
+      });
+    },
+    [columnFilters, setSubscriptionRoute],
+  );
   const [sessionCursors, setSessionCursors] = useState<Record<number, string>>({});
 
-  const [timeRange, setTimeRange] = useState<LogsTimeRange>(defaultLogsTimeRange);
+  // Reset before committing a query when a detail action or history navigation changes filters.
+  const routeKey = JSON.stringify([
+    subscriptionRoute.subscription_id,
+    subscriptionRoute.start_date,
+    subscriptionRoute.end_date,
+  ]);
+  const [previousRouteKey, setPreviousRouteKey] = useState(routeKey);
+  if (routeKey !== previousRouteKey) {
+    setPreviousRouteKey(routeKey);
+    setSessionCursors({});
+    setPagination((previous) => (previous.pageIndex === 0 ? previous : { ...previous, pageIndex: 0 }));
+  }
+
+  const [localTimeRange, setTimeRange] = useState<LogsTimeRange>(defaultLogsTimeRange);
+  const timeRange = useMemo<LogsTimeRange>(() => {
+    const { start_date, end_date } = subscriptionRoute;
+    return start_date && end_date && Date.parse(start_date) <= Date.parse(end_date)
+      ? {
+          ...localTimeRange,
+          startTime: moment(start_date).format("YYYY-MM-DDTHH:mm:ss"),
+          endTime: moment(end_date).format("YYYY-MM-DDTHH:mm:ss"),
+          isCustomDate: true,
+        }
+      : localTimeRange;
+  }, [localTimeRange, subscriptionRoute]);
   const { startTime, endTime, isCustomDate } = timeRange;
 
   const [selectedKeyIdInfoView, setSelectedKeyIdInfoView] = useState<string | null>(null);
@@ -178,14 +222,17 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
     filteredLogs.has_more === false || (filteredLogs.has_more === undefined && rows.length < pagination.pageSize);
   const rowCount = isLastPage ? rowsThroughThisPage : Math.max(filteredLogs.total, rowsThroughThisPage);
 
-  const handleSearchChange = useCallback((value: string) => {
-    setColumnFilters((previous) => {
-      const others = previous.filter((filter) => filter.id !== LOG_FILTER_IDS.SEARCH);
-      return value === "" ? others : [...others, { id: LOG_FILTER_IDS.SEARCH, value }];
-    });
-    setSessionCursors({});
-    setPagination((previous) => ({ ...previous, pageIndex: 0 }));
-  }, []);
+  const handleSearchChange = useCallback(
+    (value: string) => {
+      setColumnFilters((previous) => {
+        const others = previous.filter((filter) => filter.id !== LOG_FILTER_IDS.SEARCH);
+        return value === "" ? others : [...others, { id: LOG_FILTER_IDS.SEARCH, value }];
+      });
+      setSessionCursors({});
+      setPagination((previous) => ({ ...previous, pageIndex: 0 }));
+    },
+    [setColumnFilters],
+  );
 
   const handleSortingChange = useCallback<OnChangeFn<SortingState>>((updaterOrValue) => {
     setSorting(updaterOrValue);
@@ -193,11 +240,14 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
     setPagination((previous) => ({ ...previous, pageIndex: 0 }));
   }, []);
 
-  const handleColumnFiltersChange = useCallback<OnChangeFn<ColumnFiltersState>>((updaterOrValue) => {
-    setColumnFilters(updaterOrValue);
-    setSessionCursors({});
-    setPagination((previous) => ({ ...previous, pageIndex: 0 }));
-  }, []);
+  const handleColumnFiltersChange = useCallback<OnChangeFn<ColumnFiltersState>>(
+    (updaterOrValue) => {
+      setColumnFilters(updaterOrValue);
+      setSessionCursors({});
+      setPagination((previous) => ({ ...previous, pageIndex: 0 }));
+    },
+    [setColumnFilters],
+  );
 
   const resetToFirstPage = useCallback(() => {
     setSessionCursors({});
@@ -239,16 +289,22 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
   const handleTimeRangeChange = useCallback(
     (value: LogsTimeRange) => {
       setTimeRange(value);
+      void setSubscriptionRoute({
+        start_date:
+          value.isCustomDate && moment(value.startTime).isValid() ? moment(value.startTime).toISOString() : null,
+        end_date: value.isCustomDate && moment(value.endTime).isValid() ? moment(value.endTime).toISOString() : null,
+      });
       resetToFirstPage();
     },
-    [resetToFirstPage],
+    [resetToFirstPage, setSubscriptionRoute],
   );
 
   const handleResetFilters = useCallback(() => {
-    setColumnFilters([]);
+    setLocalColumnFilters([]);
+    void setSubscriptionRoute({ subscription_id: null, start_date: null, end_date: null });
     setTimeRange(defaultLogsTimeRange());
     resetToFirstPage();
-  }, [resetToFirstPage]);
+  }, [resetToFirstPage, setSubscriptionRoute]);
 
   const handleRowClick = useCallback(
     (log: LogEntry) => {

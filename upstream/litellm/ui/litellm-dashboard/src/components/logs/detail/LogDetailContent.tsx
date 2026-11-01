@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { UiLoadingSpinner } from "@/components/ui/ui-loading-spinner";
 import { LogEntry } from "../types";
+import { SubscriptionAttempts } from "./SubscriptionAttempts";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
 import { PROMPT_CACHE_CREATION_TOOLTIP, PROMPT_CACHE_READ_TOOLTIP } from "@/utils/promptCacheUsage";
 import GuardrailViewer from "./sections/GuardrailViewer/GuardrailViewer";
@@ -137,6 +138,8 @@ export function LogDetailContent({
       {logEntry.request_tags && Object.keys(logEntry.request_tags).length > 0 && (
         <TagsSection tags={logEntry.request_tags} />
       )}
+
+      <SubscriptionAttempts metadata={metadata} provider={logEntry.custom_llm_provider} model={logEntry.model} />
 
       {/* Request Details */}
       <div className="bg-card rounded-lg shadow-sm w-full max-w-full overflow-hidden mb-6">
