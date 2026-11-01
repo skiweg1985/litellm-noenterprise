@@ -33,16 +33,10 @@ class ChatGPTConfig(OpenAIConfig):
         api_key: str | None,
         custom_llm_provider: str,
     ) -> tuple[str | None, str | None, str]:
-        dynamic_api_base: Final = self.api_base_without_login()
-        try:
-            dynamic_api_key: Final = self.authenticator.get_access_token()
-        except GetAccessTokenError as e:
-            raise AuthenticationError(
-                model=model,
-                llm_provider=custom_llm_provider,
-                message=str(e),
-            )
-        return dynamic_api_base, dynamic_api_key, custom_llm_provider
+        # Subscription authentication: resolve the provider without a token;
+        # validate_environment fetches it per request.
+        dynamic_api_base: Final = self.authenticator.get_api_base()
+        return dynamic_api_base, api_key, custom_llm_provider
 
     def get_openai_compatible_provider_info(
         self,
@@ -63,13 +57,19 @@ class ChatGPTConfig(OpenAIConfig):
         api_key: str | None = None,
         api_base: str | None = None,
     ) -> dict:
+        # Subscription authentication: api_key names the subscription; the token comes from its file.
+        try:
+            authenticator: Final = Authenticator.for_request(litellm_params, api_key)
+            access_token: Final = authenticator.get_access_token()
+        except GetAccessTokenError as e:
+            raise AuthenticationError(model=model, llm_provider="chatgpt", message=str(e))
         validated_headers: Final = super().validate_environment(
-            headers, model, messages, optional_params, litellm_params, api_key, api_base
+            headers, model, messages, optional_params, litellm_params, access_token, api_base
         )
 
-        account_id: Final = self.authenticator.get_account_id()
+        account_id: Final = authenticator.get_account_id()
         session_id: Final = ensure_chatgpt_session_id(litellm_params)
-        default_headers: Final = get_chatgpt_default_headers(api_key or "", account_id, session_id)
+        default_headers: Final = get_chatgpt_default_headers(access_token, account_id, session_id)
         return {**default_headers, **validated_headers}
 
     def post_stream_processing(self, stream: Any) -> Any:

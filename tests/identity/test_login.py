@@ -250,7 +250,8 @@ class LoginTests(unittest.TestCase):
             headers={**headers, "Mcp-Session-Id": session_id, "MCP-Protocol-Version": "2025-06-18"},
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         )
-        self.assertEqual(reused.status_code, 403, reused.text)
+        self.assertEqual(reused.status_code, 404, reused.text)
+        self.assertEqual(reused.json()["error"]["code"], -32001)
 
 
 if __name__ == "__main__":

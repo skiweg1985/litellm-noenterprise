@@ -17,6 +17,11 @@ protected persistent credentials, refresh and disconnect. The existing
 access, including mobile controls and reconnect guidance. See
 [personal connection usage and browser checks](docs/identity.md#manage-personal-connections).
 
+[Independent provider extensions](docs/extensions.md) add integrated ChatGPT
+subscription administration, quota monitoring, provider compatibility fixes,
+parallel streamed tool-call handling and an optional OpenRouter classifier.
+No subscription or external deployment is configured by default.
+
 ## Build and verify
 
 ```sh
@@ -26,6 +31,7 @@ python3 scripts/audit_source.py
 python3 scripts/audit_image.py litellm-noenterprise:1.106.6
 python3 scripts/smoke_image.py litellm-noenterprise:1.106.6
 python3 scripts/test_identity.py litellm-noenterprise:1.106.6
+python3 scripts/test_extensions.py litellm-noenterprise:1.106.6
 ```
 
 The smoke check starts isolated local containers, sends a proxy request to a

@@ -2221,12 +2221,12 @@ if MCP_AVAILABLE:
             consumed_messages: list[Message] = []
 
             # Owner-binding: a live stateful session may only be driven by the
-            # caller that created it. Reject mismatches with 403 so a leaked
+            # caller that created it. Reject mismatches with 404 so a leaked
             # mcp-session-id cannot be hijacked by another authenticated user.
             #
             # Run before ``_handle_stale_mcp_session`` so a non-owner cannot
             # force-clean another caller's residual tracking entries via a
-            # stale DELETE, and before peeking the request body so the 403
+            # stale DELETE, and before peeking the request body so the 404
             # response sees a pristine ``receive`` channel.
             if session_id:
                 expected_owner: Final = _stateful_session_owners.get(session_id)
@@ -2236,11 +2236,13 @@ if MCP_AVAILABLE:
                         "Rejecting MCP request: session '%s' owner mismatch.",
                         session_id,
                     )
+                    # Return a missing session so clients can reinitialize after a token refresh.
                     forbidden_response: Final = JSONResponse(
-                        status_code=403,
+                        status_code=404,
                         content={
-                            "error": "Forbidden",
-                            "details": "mcp-session-id is bound to a different caller.",
+                            "jsonrpc": "2.0",
+                            "id": None,
+                            "error": {"code": -32001, "message": "Session not found"},
                         },
                     )
                     await forbidden_response(scope, receive, send)

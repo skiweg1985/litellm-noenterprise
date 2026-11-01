@@ -255,6 +255,13 @@ const menuGroups: MenuGroup[] = [
           },
         ],
       },
+      {
+        key: "chatgpt-subscriptions",
+        page: "chatgpt-subscriptions",
+        label: "ChatGPT Subscriptions",
+        icon: <Wallet {...ICON} />,
+        roles: ["Admin", "proxy_admin"],
+      },
       { key: "mcp-servers", page: "mcp-servers", label: "MCP Servers", icon: <Server {...ICON} /> },
       { key: "skills", page: "skills", label: "Skills", icon: <Blocks {...ICON} />, roles: all_admin_roles },
       { key: "guardrails", page: "guardrails", label: "Guardrails", icon: <Shield {...ICON} /> },

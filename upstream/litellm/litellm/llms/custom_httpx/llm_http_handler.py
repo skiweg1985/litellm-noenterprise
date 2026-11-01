@@ -2665,7 +2665,7 @@ class BaseLLMHTTPHandler:
                     extra_body=extra_body, request=data, model=model, litellm_params=litellm_params
                 )
             )
-        stream = bool(stream or data.get("stream"))
+        stream = bool(caller_requested_stream or (data.get("stream") and custom_llm_provider != "chatgpt"))  # Preserve the caller's streaming preference.
 
         # Preserve the OpenAI-style request context (not sent to the provider) for streaming
         # hooks/metadata; the streaming iterator now consumes this to run deployment hooks
@@ -2860,7 +2860,7 @@ class BaseLLMHTTPHandler:
                     extra_body=extra_body, request=data, model=model, litellm_params=litellm_params
                 )
             )
-        stream = bool(stream or data.get("stream"))
+        stream = bool(caller_requested_stream or (data.get("stream") and custom_llm_provider != "chatgpt"))  # Preserve the caller's streaming preference.
 
         # Preserve the OpenAI-style request context (not sent to the provider) for streaming
         # hooks/metadata; the streaming iterator now consumes this to run deployment hooks

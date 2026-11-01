@@ -1,0 +1,343 @@
+{
+  "text": [
+    {
+      "type": "response.created",
+      "response": {
+        "id": "resp_synthetic",
+        "object": "response",
+        "created_at": 1700000000,
+        "model": "gpt-5.6-sol",
+        "status": "in_progress",
+        "output": [],
+        "error": null,
+        "incomplete_details": null,
+        "instructions": null,
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "max_output_tokens": null,
+        "previous_response_id": null,
+        "metadata": {},
+        "text": {
+          "format": {
+            "type": "text"
+          }
+        },
+        "truncation": "disabled",
+        "usage": null
+      },
+      "sequence_number": 0
+    },
+    {
+      "type": "response.in_progress",
+      "response": {
+        "id": "resp_synthetic",
+        "object": "response",
+        "created_at": 1700000000,
+        "model": "gpt-5.6-sol",
+        "status": "in_progress",
+        "output": [],
+        "error": null,
+        "incomplete_details": null,
+        "instructions": null,
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "max_output_tokens": null,
+        "previous_response_id": null,
+        "metadata": {},
+        "text": {
+          "format": {
+            "type": "text"
+          }
+        },
+        "truncation": "disabled",
+        "usage": null
+      },
+      "sequence_number": 1
+    },
+    {
+      "type": "response.output_item.added",
+      "output_index": 0,
+      "item": {
+        "id": "msg_synthetic",
+        "type": "message",
+        "status": "in_progress",
+        "role": "assistant",
+        "content": []
+      },
+      "sequence_number": 2
+    },
+    {
+      "type": "response.content_part.added",
+      "item_id": "msg_synthetic",
+      "output_index": 0,
+      "content_index": 0,
+      "part": {
+        "type": "output_text",
+        "text": "",
+        "annotations": [],
+        "logprobs": []
+      },
+      "sequence_number": 3
+    },
+    {
+      "type": "response.output_text.delta",
+      "item_id": "msg_synthetic",
+      "output_index": 0,
+      "content_index": 0,
+      "delta": "ok",
+      "logprobs": [],
+      "sequence_number": 4
+    },
+    {
+      "type": "response.output_text.done",
+      "item_id": "msg_synthetic",
+      "output_index": 0,
+      "content_index": 0,
+      "text": "ok",
+      "logprobs": [],
+      "sequence_number": 5
+    },
+    {
+      "type": "response.content_part.done",
+      "item_id": "msg_synthetic",
+      "output_index": 0,
+      "content_index": 0,
+      "part": {
+        "type": "output_text",
+        "text": "ok",
+        "annotations": [],
+        "logprobs": []
+      },
+      "sequence_number": 6
+    },
+    {
+      "type": "response.output_item.done",
+      "output_index": 0,
+      "item": {
+        "id": "msg_synthetic",
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "ok",
+            "annotations": [],
+            "logprobs": []
+          }
+        ]
+      },
+      "sequence_number": 7
+    },
+    {
+      "type": "response.completed",
+      "response": {
+        "id": "resp_synthetic",
+        "object": "response",
+        "created_at": 1700000000,
+        "model": "gpt-5.6-sol",
+        "status": "completed",
+        "output": [
+          {
+            "id": "msg_synthetic",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "ok",
+                "annotations": [],
+                "logprobs": []
+              }
+            ]
+          }
+        ],
+        "error": null,
+        "incomplete_details": null,
+        "instructions": null,
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "max_output_tokens": null,
+        "previous_response_id": null,
+        "metadata": {},
+        "text": {
+          "format": {
+            "type": "text"
+          }
+        },
+        "truncation": "disabled",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 2,
+          "total_tokens": 4,
+          "input_tokens_details": {
+            "cached_tokens": 0
+          },
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        }
+      },
+      "sequence_number": 8
+    }
+  ],
+  "tool": [
+    {
+      "type": "response.created",
+      "response": {
+        "id": "resp_synthetic",
+        "object": "response",
+        "created_at": 1700000000,
+        "model": "gpt-5.6-sol",
+        "status": "in_progress",
+        "output": [],
+        "error": null,
+        "incomplete_details": null,
+        "instructions": null,
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "max_output_tokens": null,
+        "previous_response_id": null,
+        "metadata": {},
+        "text": {
+          "format": {
+            "type": "text"
+          }
+        },
+        "truncation": "disabled",
+        "usage": null
+      },
+      "sequence_number": 0
+    },
+    {
+      "type": "response.in_progress",
+      "response": {
+        "id": "resp_synthetic",
+        "object": "response",
+        "created_at": 1700000000,
+        "model": "gpt-5.6-sol",
+        "status": "in_progress",
+        "output": [],
+        "error": null,
+        "incomplete_details": null,
+        "instructions": null,
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "max_output_tokens": null,
+        "previous_response_id": null,
+        "metadata": {},
+        "text": {
+          "format": {
+            "type": "text"
+          }
+        },
+        "truncation": "disabled",
+        "usage": null
+      },
+      "sequence_number": 1
+    },
+    {
+      "type": "response.output_item.added",
+      "output_index": 0,
+      "item": {
+        "id": "fc_synthetic",
+        "type": "function_call",
+        "status": "in_progress",
+        "call_id": "call_synthetic",
+        "name": "get_weather",
+        "arguments": ""
+      },
+      "sequence_number": 2
+    },
+    {
+      "type": "response.function_call_arguments.delta",
+      "output_index": 0,
+      "item_id": "fc_synthetic",
+      "delta": "{\"city\":",
+      "sequence_number": 3
+    },
+    {
+      "type": "response.function_call_arguments.delta",
+      "output_index": 0,
+      "item_id": "fc_synthetic",
+      "delta": "\"Berlin\"}",
+      "sequence_number": 4
+    },
+    {
+      "type": "response.function_call_arguments.done",
+      "output_index": 0,
+      "item_id": "fc_synthetic",
+      "arguments": "{\"city\":\"Berlin\"}",
+      "sequence_number": 5
+    },
+    {
+      "type": "response.output_item.done",
+      "output_index": 0,
+      "item": {
+        "id": "fc_synthetic",
+        "type": "function_call",
+        "status": "completed",
+        "call_id": "call_synthetic",
+        "name": "get_weather",
+        "arguments": "{\"city\":\"Berlin\"}"
+      },
+      "sequence_number": 6
+    },
+    {
+      "type": "response.completed",
+      "response": {
+        "id": "resp_synthetic",
+        "object": "response",
+        "created_at": 1700000000,
+        "model": "gpt-5.6-sol",
+        "status": "completed",
+        "output": [],
+        "error": null,
+        "incomplete_details": null,
+        "instructions": null,
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "max_output_tokens": null,
+        "previous_response_id": null,
+        "metadata": {},
+        "text": {
+          "format": {
+            "type": "text"
+          }
+        },
+        "truncation": "disabled",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 2,
+          "total_tokens": 4,
+          "input_tokens_details": {
+            "cached_tokens": 0
+          },
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        }
+      },
+      "sequence_number": 7
+    }
+  ]
+}
