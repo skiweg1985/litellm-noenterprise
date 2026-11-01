@@ -404,7 +404,7 @@ def several_accounts(directory):
                     used == {"default": {"acct-e2e"}, "team-2": {"acct-e2e"}}, used)
         chat = {"model": "unknown-sub", "messages": [{"role": "user", "content": "hi"}]}
         status, body = request("POST", "/v1/chat/completions", KEY, chat, port=port)
-        ok &= check("an unknown account fails with 401", status == 401 and "CHATGPT_ACCOUNTS" in str(body), f"{status}: {body}")
+        ok &= check("an unknown account fails with 401", status == 401 and "Unknown ChatGPT account" in str(body), f"{status}: {body}")
         for model in ("typo-sub", "bare-sub"):
             chat["model"] = model
             status, body = request("POST", "/v1/chat/completions", KEY, chat, port=port)

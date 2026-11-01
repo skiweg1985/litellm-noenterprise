@@ -18,7 +18,8 @@ access, including mobile controls and reconnect guidance. See
 [personal connection usage and browser checks](docs/identity.md#manage-personal-connections).
 
 [Independent provider extensions](docs/extensions.md) add integrated ChatGPT
-subscription administration, quota monitoring, provider compatibility fixes,
+subscription creation, naming, connection and retirement in the dashboard,
+quota monitoring, provider compatibility fixes,
 parallel streamed tool-call handling and an optional OpenRouter classifier.
 No subscription or external deployment is configured by default.
 

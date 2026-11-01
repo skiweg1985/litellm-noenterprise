@@ -1,13 +1,15 @@
 """Admin page and API for the ChatGPT sign-in, for LiteLLM proxy admins only."""
 
+import asyncio
 import logging
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import tokens
-from .service import MonitoringError
+from .service import MonitoringError, UsageService, ModelsService
 
 logger = logging.getLogger("chatgpt_subscriptions")
 
@@ -15,6 +17,28 @@ API = "/chatgpt/api/accounts"
 PAGE = "/chatgpt/ui"
 NO_STORE = {"Cache-Control": "no-store"}
 
+
+
+class SubscriptionName(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+
+
+class SubscriptionDescription(BaseModel):
+    """Stable public management fields; provider status details remain additive."""
+    model_config = ConfigDict(extra="allow")
+    account: str
+    subscription_id: str
+    display_name: str
+    connection_revision: str | None
+    retired: bool
+    state: str
+    token_valid: bool
+    models: list[str]
+
+
+class SubscriptionList(BaseModel):
+    accounts: list[SubscriptionDescription]
+    problems: list[dict]
 
 
 def litellm_admin():
@@ -179,6 +203,8 @@ def router(accounts, services, dependency=None, deployments=None, requests=None,
         return RedirectResponse("/ui/chatgpt-subscriptions/", status_code=307, headers=NO_STORE)
 
     async def describe(account):
+        services.setdefault(account.name, UsageService(account=account.name, path=account.path, transport=account.transport))
+        catalogs.setdefault(account.name, ModelsService(account=account.name, path=account.path, transport=account.transport))
         status = account.status()
         quota, quota_error = None, None
         if status["token_valid"]:
@@ -186,7 +212,7 @@ def router(accounts, services, dependency=None, deployments=None, requests=None,
                 quota = await services[account.name].get()
             except MonitoringError as exc:
                 quota_error = str(exc)
-        own = [d for d in deployments() if d["account"] == account.name and not d["problem"]]
+        own = [d for d in deployments() if d["account"] == account.name]
         available, available_error = None, None
         if status["token_valid"] and account.name in catalogs:
             try:
@@ -209,12 +235,14 @@ def router(accounts, services, dependency=None, deployments=None, requests=None,
         account = accounts.get(name)
         if account is None:
             raise HTTPException(404, "Unknown ChatGPT account.")
+        if account.retired() and action != "retired":
+            raise HTTPException(409, "Retired subscriptions cannot be changed.")
         # Audit trail in the container log; never contains tokens.
         actor = getattr(auth, "user_email", None) or getattr(auth, "user_id", None) or "unknown"
         logger.warning("ChatGPT account %s: %s by %s", name, action, actor)
         return account
 
-    @api.get(API)
+    @api.get(API, response_model=SubscriptionList)
     async def list_accounts():
         return JSONResponse(
             {
@@ -224,38 +252,61 @@ def router(accounts, services, dependency=None, deployments=None, requests=None,
             headers=NO_STORE,
         )
 
-    @api.post(API + "/{name}/login")
+    @api.post(API, response_model=SubscriptionDescription)
+    async def create_account(body: SubscriptionName, auth=Depends(dependency)):
+        try:
+            account = await asyncio.to_thread(accounts.create, body.display_name)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return JSONResponse(await describe(account), headers=NO_STORE)
+
+    @api.patch(API + "/{name}", response_model=SubscriptionDescription)
+    async def rename_account(name: str, body: SubscriptionName, auth=Depends(dependency)):
+        select(name, "renamed", auth)
+        try:
+            account = await asyncio.to_thread(accounts.rename, name, body.display_name)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return JSONResponse(await describe(account), headers=NO_STORE)
+
+    @api.post(API + "/{name}/retire", response_model=SubscriptionDescription)
+    async def retire_account(name: str, auth=Depends(dependency)):
+        select(name, "retired", auth)
+        account = await accounts.retire(name)
+        return JSONResponse(await describe(account), headers=NO_STORE)
+
+    @api.post(API + "/{name}/login", response_model=SubscriptionDescription)
     async def start_login(name: str, auth=Depends(dependency)):
         account = select(name, "sign-in started", auth)
         account.start_login()
         return JSONResponse(await describe(account), headers=NO_STORE)
 
-    @api.post(API + "/{name}/login/cancel")
+    @api.post(API + "/{name}/login/cancel", response_model=SubscriptionDescription)
     async def cancel_login(name: str, auth=Depends(dependency)):
         account = select(name, "sign-in cancelled", auth)
         await account.cancel_login()
         return JSONResponse(await describe(account), headers=NO_STORE)
 
-    @api.post(API + "/{name}/pending/confirm")
+    @api.post(API + "/{name}/pending/confirm", response_model=SubscriptionDescription)
     async def confirm_pending(name: str, auth=Depends(dependency)):
         account = select(name, "different account confirmed", auth)
         if not await account.confirm_pending():
             raise HTTPException(409, "Pending sign-in is unavailable or conflicts with another subscription.")
         return JSONResponse(await describe(account), headers=NO_STORE)
 
-    @api.post(API + "/{name}/pending/discard")
+    @api.post(API + "/{name}/pending/discard", response_model=SubscriptionDescription)
     async def discard_pending(name: str, auth=Depends(dependency)):
         account = select(name, "different account discarded", auth)
         await account.discard_pending()
         return JSONResponse(await describe(account), headers=NO_STORE)
 
-    @api.post(API + "/{name}/refresh")
+    @api.post(API + "/{name}/refresh", response_model=SubscriptionDescription)
     async def refresh(name: str, auth=Depends(dependency)):
         account = select(name, "token refresh", auth)
         await account.refresh_now()
         return JSONResponse(await describe(account), headers=NO_STORE)
 
-    @api.post(API + "/{name}/logout")
+    @api.post(API + "/{name}/logout", response_model=SubscriptionDescription)
     async def logout(name: str, auth=Depends(dependency)):
         account = select(name, "sign-out", auth)
         await account.logout()
