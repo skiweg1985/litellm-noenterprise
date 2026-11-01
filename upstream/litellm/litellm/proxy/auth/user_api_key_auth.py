@@ -1613,6 +1613,13 @@ async def user_api_key_auth_builder(
             _ensure_parent_otel_span_on_request_state(request)
             parent_otel_span = getattr(request.state, "parent_otel_span", None)
 
+        # Independent browser admission preserves the native API-key fallback.
+        from litellm.proxy.auth.oidc_identity import authenticate_browser
+
+        browser_auth = await authenticate_browser(request, api_key)
+        if browser_auth is not None:
+            return browser_auth
+
         ### USER-DEFINED AUTH FUNCTION ###
         if enterprise_custom_auth is not None:
             with tracer.trace("litellm.proxy.auth.enterprise_custom_auth"):
@@ -1949,6 +1956,8 @@ async def user_api_key_auth_builder(
             elif isinstance(response, UserAPIKeyAuth):
                 return response
         if master_key is None:
+            if general_settings.get("oidc_identity") is not None:
+                raise HTTPException(status_code=503, detail="OIDC requires a master key")
             if isinstance(api_key, str):
                 return UserAPIKeyAuth(
                     api_key=api_key,
@@ -2832,7 +2841,7 @@ async def _inherit_org_identity(
 def is_no_auth_dev_mode(master_key: str | None, general_settings: Mapping[str, object]) -> bool:
     return master_key is None and not any(
         general_settings.get(flag, False)
-        for flag in ("enable_jwt_auth", "enable_oauth2_auth", "enable_oauth2_proxy_auth")
+        for flag in ("enable_jwt_auth", "enable_oauth2_auth", "enable_oauth2_proxy_auth", "oidc_identity")
     )
 
 
