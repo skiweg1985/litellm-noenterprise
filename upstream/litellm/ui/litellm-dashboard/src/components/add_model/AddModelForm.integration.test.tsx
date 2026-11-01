@@ -1,4 +1,4 @@
-import { fireEvent, renderHook, screen, waitFor, within, renderWithProviders } from "../../../tests/test-utils";
+import { act, fireEvent, renderHook, screen, waitFor, within, renderWithProviders } from "../../../tests/test-utils";
 import userEvent, { PointerEventsCheckLevel } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Team } from "../key_team_helpers/key_list";
@@ -8,6 +8,22 @@ import { projectMountedValues, useMountRegistry, type MountedFormValues } from "
 import { useForm } from "react-hook-form";
 import AddModelForm from "./AddModelForm";
 import { EMPTY_DECISION_CATALOG } from "@/lib/decisionModels";
+
+vi.mock("@/lib/http/chatgptSubscriptions", () => ({
+  getSubscriptions: vi.fn().mockResolvedValue({
+    accounts: [
+      {
+        account: "fixture",
+        subscription_id: "subscription-one",
+        display_name: "Development",
+        token_valid: true,
+        retired: false,
+        available_models: { models: [{ slug: "example-model", name: "Example" }], missing: [] },
+      },
+    ],
+    problems: [],
+  }),
+}));
 
 vi.mock("../molecules/models/ProviderLogo", () => ({
   ProviderLogo: ({ provider, className }: { provider: string; className?: string }) => (
@@ -579,4 +595,71 @@ describe("AddModelForm", () => {
       expect(values).not.toHaveProperty("cache_control_injection_points");
     });
   });
+});
+
+it("uses a subscription picker instead of API credentials for ChatGPT models", async () => {
+  const auth = vi.mocked(await import("@/app/(dashboard)/hooks/useAuthorized"));
+  auth.default.mockReturnValue(mockAuthorizedUser("proxy_admin", "user-1", true));
+  const props = createTestProps();
+  props.form.setValue("custom_llm_provider", "CHATGPT");
+  renderWithProviders(<AddModelForm {...props} selectedProvider="CHATGPT" />);
+  await userEvent.click(await screen.findByRole("combobox", { name: "ChatGPT subscription" }));
+  await userEvent.click(await screen.findByRole("option", { name: "Development" }));
+  expect(props.form.getValues("subscription_id")).toBe("subscription-one");
+  expect(screen.queryByRole("combobox", { name: "Existing Credentials" })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
+});
+
+it("submits the ordered reserve selection through the native add form", async () => {
+  const { testQueryClient } = await import("../../../tests/test-utils");
+  testQueryClient.clear();
+  const auth = vi.mocked(await import("@/app/(dashboard)/hooks/useAuthorized"));
+  auth.default.mockReturnValue(mockAuthorizedUser("proxy_admin", "user-1", true));
+  const api = vi.mocked(await import("@/lib/http/chatgptSubscriptions"));
+  api.getSubscriptions.mockResolvedValue({ accounts: [
+    { account: "first", subscription_id: "first", display_name: "Primary", token_valid: true, retired: false, available_models: { models: [{ slug: "example-model", name: "Example" }], missing: [] } },
+    { account: "second", subscription_id: "second", display_name: "Reserve", token_valid: true, retired: false, available_models: { models: [{ slug: "example-model", name: "Example" }], missing: [] } },
+  ], problems: [] } as never);
+  const props = createTestProps();
+  props.form.setValue("custom_llm_provider", "CHATGPT");
+  renderWithProviders(<AddModelForm {...props} selectedProvider="CHATGPT" />);
+  await userEvent.click(await screen.findByRole("combobox", { name: "Subscription routing mode" }));
+  await userEvent.click(await screen.findByRole("option", { name: "Preferred subscription with reserves" }));
+  await userEvent.click(screen.getByRole("combobox", { name: "Add subscription" }));
+  await userEvent.click(await screen.findByRole("option", { name: "Primary" }));
+  await userEvent.click(screen.getByRole("combobox", { name: "Add subscription" }));
+  await userEvent.click(await screen.findByRole("option", { name: "Reserve" }));
+  await userEvent.click(screen.getByRole("button", { name: "Move Reserve up" }));
+  expect(props.mountedValues().subscription_selection).toEqual({ mode: "priority", subscription_ids: ["second", "first"] });
+});
+
+
+it("keeps a prefilled model and public name when routing changes before subscriptions load", async () => {
+  const { testQueryClient } = await import("../../../tests/test-utils");
+  testQueryClient.clear();
+  const auth = vi.mocked(await import("@/app/(dashboard)/hooks/useAuthorized"));
+  auth.default.mockReturnValue(mockAuthorizedUser("proxy_admin", "user-1", true));
+  const api = vi.mocked(await import("@/lib/http/chatgptSubscriptions"));
+  type Subscriptions = Awaited<ReturnType<typeof api.getSubscriptions>>;
+  let resolveSubscriptions!: (value: Subscriptions) => void;
+  api.getSubscriptions.mockReturnValue(new Promise<Subscriptions>((resolve) => { resolveSubscriptions = resolve; }));
+  const props = createTestProps();
+  props.form.setValue("custom_llm_provider", "CHATGPT");
+  props.form.setValue("subscription_id", "first");
+  props.form.setValue("model", ["chatgpt/example-model"]);
+  renderWithProviders(<AddModelForm {...props} selectedProvider="CHATGPT" />);
+  const publicName = within(await screen.findByRole("table")).getByRole("textbox");
+  fireEvent.change(publicName, { target: { value: "my-subscription-model" } });
+  await userEvent.click(screen.getByRole("combobox", { name: "Subscription routing mode" }));
+  await userEvent.click(await screen.findByRole("option", { name: "Distribute requests" }));
+  expect(within(screen.getByRole("table")).getByRole("textbox")).toHaveValue("my-subscription-model");
+  await act(async () => resolveSubscriptions({ accounts: [
+    { account: "first", subscription_id: "first", display_name: "First subscription", token_valid: true, retired: false, available_models: { models: [{ slug: "example-model", name: "Example" }], missing: [] } },
+    { account: "second", subscription_id: "second", display_name: "Second subscription", token_valid: true, retired: false, available_models: { models: [{ slug: "example-model", name: "Example" }], missing: [] } },
+  ], problems: [] } as Subscriptions));
+  await userEvent.click(screen.getByRole("combobox", { name: "Add subscription" }));
+  await userEvent.click(await screen.findByRole("option", { name: "Second subscription" }));
+  expect(within(screen.getByRole("table")).getByRole("textbox")).toHaveValue("my-subscription-model");
+  expect(props.mountedValues().model).toEqual(["chatgpt/example-model"]);
+  expect(props.mountedValues().subscription_selection).toEqual({ mode: "distribution", subscription_ids: ["first", "second"] });
 });

@@ -1109,6 +1109,11 @@ def responses_api_bridge_check(
 ) -> tuple[dict, str]:
     model_info: dict[str, object] = {}
 
+    # Subscription catalogs can expose models absent from the static price map.
+    # The ChatGPT backend still requires the Responses protocol for those models.
+    if custom_llm_provider == "chatgpt":
+        return {"mode": "responses"}, model.removeprefix("responses/")
+
     # Global flag: route ALL OpenAI chat completions through Responses API.
     # Returns early with minimal model_info; callers only inspect the "mode" key.
     if litellm.route_all_chat_openai_to_responses and custom_llm_provider == "openai":

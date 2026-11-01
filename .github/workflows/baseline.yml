@@ -47,14 +47,6 @@ jobs:
           python3 scripts/audit_image.py "$IMAGE"
       - name: Exercise the proxy and existing MCP entry points
         run: python3 scripts/smoke_image.py "$IMAGE"
-      - name: Exercise independent provider and subscription extensions
-        run: python3 scripts/test_extensions.py "$IMAGE"
-      - name: Exercise browser identity and provider-token API journeys
-        run: |
-          python3 scripts/test_identity.py "$IMAGE"
-          python3 scripts/test_identity.py "$IMAGE" --reject-missing-master
-          python3 scripts/test_identity.py "$IMAGE" --test-pattern test_scope_profile.py --api-scope-name https://api.example.test/invoke --api-token-scope invoke --api-audience litellm-test --api-token-type at+jwt --master-key fixture.master.with-dots-and-sufficient-length
-          python3 scripts/test_identity.py "$IMAGE" --api-audience litellm-test --reject-invalid-api
       - name: Install pinned browser test dependencies
         run: |
           npm ci --prefix upstream/litellm/tests/e2e/ui --ignore-scripts --no-audit --no-fund
@@ -63,3 +55,20 @@ jobs:
         run: |
           python3 scripts/test_identity.py "$IMAGE" --browser
           python3 scripts/test_identity.py "$IMAGE" --browser --browser-admin-disabled
+      - name: Exercise independent provider and subscription extensions
+        run: python3 scripts/test_extensions.py "$IMAGE"
+      - name: Exercise browser identity and provider-token API journeys
+        run: |
+          python3 scripts/test_identity.py "$IMAGE"
+          python3 scripts/test_identity.py "$IMAGE" --response-cache --test-pattern test_subscription_logs.py
+          python3 scripts/test_identity.py "$IMAGE" --reject-missing-master
+          python3 scripts/test_identity.py "$IMAGE" --test-pattern test_scope_profile.py --api-scope-name https://api.example.test/invoke --api-token-scope invoke --api-audience litellm-test --api-token-type at+jwt --master-key fixture.master.with-dots-and-sufficient-length
+          python3 scripts/test_identity.py "$IMAGE" --api-audience litellm-test --reject-invalid-api
+      - name: Exercise distributed subscriptions and cache attribution across proxy workers
+        run: |
+          python3 scripts/test_identity.py "$IMAGE" --proxy-workers 2 --response-cache --test-pattern test_subscription_distribution.py
+          python3 scripts/test_identity.py "$IMAGE" --proxy-workers 2 --test-pattern test_subscription_reserves.py
+          python3 scripts/test_identity.py "$IMAGE" --test-pattern test_subscription_capacity.py
+          python3 scripts/test_identity.py "$IMAGE" --test-pattern test_subscription_headers.py
+          python3 scripts/test_identity.py "$IMAGE" --proxy-workers 2 --test-pattern test_subscription_conversion.py
+          python3 scripts/test_identity.py "$IMAGE" --proxy-workers 2 --test-pattern test_subscription_bulk.py

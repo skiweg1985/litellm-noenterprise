@@ -57,7 +57,9 @@ class ChatGPTResponsesAPIConfig(OpenAIResponsesAPIConfig):
         # Subscription authentication: api_key names the subscription; the token comes from its file.
         try:
             authenticator: Final = Authenticator.for_request(litellm_params)
-            access_token: Final = authenticator.get_access_token()
+            access_token, account_id, snapshot = authenticator.request_credentials()
+            if litellm_params is not None:
+                object.__setattr__(litellm_params, "_chatgpt_credential_snapshot", snapshot)
         except GetAccessTokenError as e:
             raise AuthenticationError(
                 model=model,
@@ -65,10 +67,10 @@ class ChatGPTResponsesAPIConfig(OpenAIResponsesAPIConfig):
                 message=str(e),
             )
 
-        account_id: Final = authenticator.get_account_id()
         session_id: Final = ensure_chatgpt_session_id(litellm_params)
         default_headers: Final = get_chatgpt_default_headers(access_token, account_id, session_id)
-        return {**default_headers, **headers}
+        from litellm.llms.chatgpt.common_utils import merge_subscription_headers
+        return merge_subscription_headers(default_headers, headers)
 
     def transform_responses_api_request(
         self,

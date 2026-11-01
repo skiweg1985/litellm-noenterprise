@@ -408,6 +408,9 @@ _CLIENT_PRICING_METADATA_FIELDS: Final = frozenset({"model_info"})
 # key or team setting keeps it, so the strip is never gated.
 _ROUTER_RESERVED_METADATA_FIELDS: Final = frozenset(
     {
+        "subscription_logical_id",
+        "subscription_ids",
+        "subscription_attempts",
         "attempted_fallbacks",
         "original_model_group",
         "previous_models",
@@ -675,6 +678,7 @@ def _strip_router_reserved_metadata(
     data: dict[str, object],  # mutable-ok: strips in place on the request body the pre-call pipeline threads through
 ) -> None:
     """Drop the router-owned fallback stamps from any client-supplied metadata bucket."""
+    data.pop("_subscription_attribution", None)
     for metadata_key in ("metadata", "litellm_metadata"):
         if not isinstance(metadata := data.get(metadata_key), dict):
             continue

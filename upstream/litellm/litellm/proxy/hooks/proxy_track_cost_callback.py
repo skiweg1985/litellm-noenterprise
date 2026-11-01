@@ -324,6 +324,10 @@ class _ProxyDBLogger(CustomLogger):
 
         existing_metadata: Final[dict] = request_data.get("metadata", None) or {}
         existing_metadata.update(_metadata)
+        from litellm.proxy.extensions.chatgpt_subscriptions.attribution import FIELDS
+        for field in FIELDS:
+            existing_metadata.pop(field, None)
+        existing_metadata.update(request_data.get("_subscription_attribution") or {})
 
         litellm_metadata_bucket: Final = request_data.get("litellm_metadata")
         if (

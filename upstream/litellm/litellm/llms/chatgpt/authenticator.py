@@ -72,8 +72,8 @@ _AUTHENTICATORS: Final[dict[str, "Authenticator"]] = {}
 
 
 def configured_accounts() -> list[str]:
-    names = os.getenv("CHATGPT_ACCOUNTS") or DEFAULT_ACCOUNT
-    return [name.strip() for name in names.split(",") if name.strip()]
+    from litellm.proxy.extensions.chatgpt_subscriptions.tokens import configured_accounts as configured
+    return configured()
 
 
 def account_for_api_key(api_key: object) -> str | None:
@@ -120,7 +120,7 @@ class Authenticator:
             )
         if not _ACCOUNT_NAME.fullmatch(account) or account not in configured_accounts():
             raise GetAccessTokenError(
-                message=f"Unknown ChatGPT account {account!r}. Add it to CHATGPT_ACCOUNTS.",
+                message=f"Unknown ChatGPT account {account!r}. Add or reconnect it in ChatGPT subscriptions.",
                 status_code=401,
             )
         authenticator = _AUTHENTICATORS.get(account)
@@ -131,8 +131,39 @@ class Authenticator:
     def get_api_base(self) -> str:
         return os.getenv("CHATGPT_API_BASE") or os.getenv("OPENAI_CHATGPT_API_BASE") or CHATGPT_API_BASE
 
+    def request_credentials(self):
+        """Read token, provider identity and revision from one locked credential generation."""
+        from litellm.proxy.extensions.chatgpt_subscriptions import tokens
+        from litellm.proxy.extensions.chatgpt_subscriptions.registry import Registry
+        from litellm.proxy.extensions.chatgpt_subscriptions.accounts import Account, _fingerprint
+        from litellm.proxy.extensions.chatgpt_subscriptions.attribution import CredentialSnapshot
+        registry = Registry()
+        with tokens.locked(registry.lock_path), self._auth_file_lock():
+            access_token = self.get_access_token()
+            account_id = self.get_account_id()
+            record = self._read_auth_file() or {}
+            # Legacy token files can be used before the background watcher runs.
+            # Initialize their durable identity while holding the same generation lock.
+            revision = _optional_str(record.get("connection_revision"))
+            if revision is None:
+                account = Account(self.account, path=self.auth_file)
+                fields = account._connection_fields(tokens.identity(record))
+                revision = fields["connection_revision"]
+                self._write_auth_file({**record, "connection_revision": revision})
+                if (self._read_auth_file() or {}).get("connection_revision") != revision:
+                    raise GetAccessTokenError(message="Subscription attribution could not be initialized.", status_code=503)
+                account._update(**fields)
+            entry = registry.seed([self.account])[self.account]
+            snapshot = CredentialSnapshot(
+                entry["subscription_id"], entry["display_name"], revision, _fingerprint(access_token),
+            )
+            return access_token, account_id, snapshot
+
     def get_access_token(self) -> str:
         # Subscription authentication: never start a device-code sign-in inside a request.
+        from litellm.proxy.extensions.chatgpt_subscriptions.registry import Registry
+        if Registry().retired(self.account):
+            raise GetAccessTokenError(message="ChatGPT subscription is retired.", status_code=401)
         auth_data: Final = self._read_auth_file()
         if auth_data:
             access_token: Final = _optional_str(auth_data.get("access_token"))
@@ -494,6 +525,9 @@ class Authenticator:
             "id_token": id_token,
         }
         auth_data: Final = self._build_auth_record(refreshed)
+        previous = self._read_auth_file() or {}
+        if previous.get("connection_revision"):
+            auth_data["connection_revision"] = previous["connection_revision"]
         self._write_auth_file(auth_data)
         return refreshed
 

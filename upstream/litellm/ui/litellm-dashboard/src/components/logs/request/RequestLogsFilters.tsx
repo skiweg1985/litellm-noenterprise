@@ -467,6 +467,17 @@ export function RequestLogsFilters({ get, set, teams, logsWindow }: RequestLogsF
         />
       </DataTableFilterField>
 
+      <DataTableFilterField label="Subscription ID">
+        <Input
+          aria-label="Subscription ID"
+          value={valueOf(LOG_FILTER_IDS.SUBSCRIPTION_ID)}
+          onChange={(event) => set(LOG_FILTER_IDS.SUBSCRIPTION_ID, emptyToUndefined(event.target.value))}
+          placeholder="Enter subscription ID…"
+          maxLength={128}
+        />
+        <p className="text-xs text-muted-foreground">Select “Filter logs for this subscription” in request details, or enter its stable ID.</p>
+      </DataTableFilterField>
+
       <ModelFilterField value={valueOf(LOG_FILTER_IDS.MODEL_ID)} onChange={setter(LOG_FILTER_IDS.MODEL_ID)} />
 
       <DataTableFilterField label="Public model / search tool">

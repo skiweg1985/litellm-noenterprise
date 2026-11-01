@@ -63,6 +63,32 @@ class SubscriptionAdministrationTests(unittest.TestCase):
             self.client().get(API, headers={"Authorization": "Bearer " + token}).status_code, 403
         )
 
+    def test_registry_mutations_enforce_browser_role_origin_and_provider_boundary(self):
+        admin = self.browser(["access", "admin"])
+        headers = {**BROWSER_AUTH, "Origin": BASE}
+        for origin in (None, "https://other.invalid"):
+            denied_headers = dict(BROWSER_AUTH)
+            if origin:
+                denied_headers["Origin"] = origin
+            self.assertEqual(admin.post(API, headers=denied_headers, json={"display_name": "Blocked"}).status_code, 403)
+        created = admin.post(API, headers=headers, json={"display_name": "Synthetic admin account"})
+        self.assertEqual(created.status_code, 200, created.text)
+        account = created.json()
+        endpoint = API + "/" + account["account"]
+        personal = self.browser(["access"])
+        token = httpx.post(ISSUER + "/control/access-token", json={"oid": "registry-provider-admin", "roles": ["access", "admin"]}, trust_env=False).json()["access_token"]
+        for client, credentials in ((personal, headers), (self.client(), {"Authorization": "Bearer " + token})):
+            for method, path, body in (("POST", API, {"display_name": "Blocked"}), ("PATCH", endpoint, {"display_name": "Blocked"}), ("POST", endpoint + "/retire", None)):
+                self.assertEqual(client.request(method, path, headers=credentials, json=body).status_code, 403)
+        for method, path, body in (("PATCH", endpoint, {"display_name": "Blocked"}), ("POST", endpoint + "/retire", None)):
+            self.assertEqual(admin.request(method, path, headers=BROWSER_AUTH, json=body).status_code, 403)
+        renamed = admin.patch(endpoint, headers=headers, json={"display_name": "Renamed synthetic account"})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["subscription_id"], account["subscription_id"])
+        retired = admin.post(endpoint + "/retire", headers=headers)
+        self.assertEqual(retired.status_code, 200, retired.text)
+        self.assertTrue(retired.json()["retired"])
+
     def test_native_dashboard_login_key_can_read_subscriptions(self):
         client = self.client()
         login = client.post("/login", data={"username": "admin", "password": "sk-identity-test-only"})
@@ -73,6 +99,11 @@ class SubscriptionAdministrationTests(unittest.TestCase):
         claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
         result = client.get(API, headers={"Authorization": "Bearer " + claims["key"]})
         self.assertEqual(result.status_code, 200, result.text)
+        headers = {"Authorization": "Bearer " + claims["key"]}
+        created = client.post(API, headers=headers, json={"display_name": "Native synthetic account"})
+        self.assertEqual(created.status_code, 200, created.text)
+        retired = client.post(API + "/" + created.json()["account"] + "/retire", headers=headers)
+        self.assertEqual(retired.status_code, 200, retired.text)
 
     def test_anonymous_and_monitoring_key_do_not_grant_administration(self):
         client = self.client()

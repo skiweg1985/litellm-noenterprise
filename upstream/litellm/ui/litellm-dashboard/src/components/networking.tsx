@@ -1,3 +1,5 @@
+import type { paths as SubscriptionLogPaths } from "@/lib/http/subscription-logs-schema";
+
 // Shared date formatter for daily activity endpoints
 export const formatDate = (date: Date) => {
   const year = date.getFullYear();
@@ -1873,7 +1875,9 @@ export const userFilterUICall = async (accessToken: string, params: URLSearchPar
 /**
  * Optional query params for /spend/logs/ui - matches backend spend_management_endpoints.py
  */
+type SubscriptionLogQuery = NonNullable<SubscriptionLogPaths["/spend/logs/ui"]["get"]["parameters"]["query"]>;
 interface UiSpendLogsParams {
+  subscription_id?: NonNullable<SubscriptionLogQuery["subscription_id"]>;
   api_key?: string;
   team_id?: string;
   request_id?: string;

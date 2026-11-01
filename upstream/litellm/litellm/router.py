@@ -4203,6 +4203,8 @@ class Router:
             kwargs.pop(key, None)
         self._merge_tools_from_deployment(deployment=deployment, kwargs=kwargs)
 
+        from litellm.proxy.extensions.chatgpt_subscriptions.routing import pin_subscription_credentials
+        pin_subscription_credentials(deployment, kwargs)
         model_info = deployment.get("model_info", {}).copy()
         deployment_litellm_model_name = deployment["litellm_params"]["model"]
         deployment_api_base = deployment["litellm_params"].get("api_base")
@@ -7929,7 +7931,11 @@ class Router:
                 if model_group is not None:
                     _fallback_metadata["original_model_group"] = model_group
         include_fallback_errors: Final = kwargs.get("include_fallback_errors", False) is True
-        disable_fallbacks: Final[bool | None] = kwargs.pop("disable_fallbacks", False)
+        from litellm.proxy.extensions.chatgpt_subscriptions.routing import fixed_subscription_group
+        from litellm.proxy.extensions.chatgpt_subscriptions.expansion import hydrate_missing_parent
+        await hydrate_missing_parent(self, model_group)
+        requested_disable_fallbacks = kwargs.pop("disable_fallbacks", False)
+        disable_fallbacks: Final[bool | None] = fixed_subscription_group(self, model_group) or requested_disable_fallbacks
         record_disable_fallbacks(kwargs, disable_fallbacks is True)
         fallbacks: Final[list | None] = kwargs.get("fallbacks", self.fallbacks)
         context_window_fallbacks: list | None = kwargs.get("context_window_fallbacks", self.context_window_fallbacks)
@@ -8045,7 +8051,10 @@ class Router:
         # Support per-request model_group_retry_policy override (from key/team settings)
         model_group_retry_policy: Final = kwargs.pop("model_group_retry_policy", self.model_group_retry_policy)
         model_group: Final[str | None] = kwargs.get("model")
-        request_num_retries: Final[int | None] = kwargs.pop("num_retries", None)
+        from litellm.proxy.extensions.chatgpt_subscriptions.policy import retry_policy as subscription_retry_policy, record_failure as subscription_record_failure
+        managed_policy = await subscription_retry_policy(self, model_group, kwargs)
+        requested_retries = kwargs.pop("num_retries", None)
+        request_num_retries: Final[int | None] = managed_policy.retries if managed_policy is not None else requested_retries
         num_retries = request_num_retries
         if num_retries is None:
             # Fall back to the router setting (then 0) so the comparisons below never
@@ -8077,6 +8086,8 @@ class Router:
             current_attempt = None
             original_exception = e
             deployment_num_retries: Final = getattr(e, "num_retries", None)
+            if managed_policy is not None and not await subscription_record_failure(self, kwargs, e):
+                raise
 
             if (
                 request_num_retries is None
@@ -8098,7 +8109,7 @@ class Router:
             # Check retry policy FIRST, before should_retry_this_error
             # This allows retry policies to override the healthy deployments check
             _retry_policy_applies = False
-            if request_num_retries != 0 and (self.retry_policy is not None or model_group_retry_policy is not None):
+            if managed_policy is None and request_num_retries != 0 and (self.retry_policy is not None or model_group_retry_policy is not None):
                 # get num_retries from retry policy
                 # Use the model_group captured at the start of the function, or get it from metadata
                 # kwargs.get("model") at this point is the deployment model, not the model_group
@@ -8116,7 +8127,7 @@ class Router:
 
             # raises an exception if this error should not be retries
             # Skip this check if retry policy applies (retry policy takes precedence)
-            if not _retry_policy_applies:
+            if managed_policy is None and not _retry_policy_applies:
                 self.should_retry_this_error(
                     error=e,
                     healthy_deployments=_healthy_deployments,
@@ -8150,7 +8161,7 @@ class Router:
                 all_deployments=_all_deployments,
             )
 
-            await asyncio.sleep(retry_after)
+            await asyncio.sleep(0 if managed_policy is not None else retry_after)
 
             for current_attempt in range(num_retries):
                 try:
@@ -8173,6 +8184,8 @@ class Router:
                     # Always track the latest error so we raise the most
                     # recent exception instead of the first one.
                     original_exception = e
+                    if managed_policy is not None and not await subscription_record_failure(self, kwargs, e):
+                        raise
 
                     ## LOGGING
                     kwargs = self.log_retry(kwargs=kwargs, e=e)
@@ -8193,7 +8206,7 @@ class Router:
                     # window exceeded). If so, raise immediately instead of
                     # continuing the retry loop. Respect retry policy
                     # precedence - only check when no retry policy applies.
-                    if not _retry_policy_applies:
+                    if managed_policy is None and not _retry_policy_applies:
                         try:
                             self.should_retry_this_error(
                                 error=e,
@@ -8219,7 +8232,7 @@ class Router:
                         healthy_deployments=_healthy_deployments,
                         all_deployments=_all_deployments,
                     )
-                    await asyncio.sleep(_timeout)
+                    await asyncio.sleep(0 if managed_policy is not None else _timeout)
 
             if type(original_exception) in litellm.LITELLM_EXCEPTION_TYPES:
                 setattr(original_exception, "max_retries", num_retries)
@@ -8440,14 +8453,16 @@ class Router:
                 return
             model_group: Final = metadata.get("model_group", None)
             model_info: Final = litellm_params.get("model_info", {}) or {}
-            deployment_id: Final = model_info.get("id", None)
+            from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_model_id
+
+            deployment_id: Final = capacity_model_id(model_info)
             if model_group is None or deployment_id is None or self.get_deployment(model_id=str(deployment_id)) is None:
                 return
 
             # Always track deployment successes for cooldown logic, regardless of TPM/RPM limits
             increment_deployment_successes_for_current_minute(
                 litellm_router_instance=self,
-                deployment_id=str(deployment_id),
+                deployment_id=str(model_info.get("id", deployment_id)),
             )
 
             total_tokens: Final[float] = standard_logging_object.get("total_tokens", 0)
@@ -8480,7 +8495,9 @@ class Router:
             if deployment_metadata is None or not isinstance(model_group, str):
                 return
             model_info: Final = deployment_metadata["model_info"]
-            deployment_id: Final = model_info.get("id") if isinstance(model_info, dict) else None
+            from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_model_id
+
+            deployment_id: Final = capacity_model_id(model_info) if isinstance(model_info, dict) else None
             if deployment_id is None:
                 return
             total_tokens: Final = response_total_token_count(response)
@@ -8647,6 +8664,18 @@ class Router:
                 )
                 return False
 
+            member = _model_info.get("_subscription_member") if isinstance(_model_info, dict) else None
+            if member and ((_model_info.get("subscription_assignment") or {}).get("mode") in ("priority", "distribution")):
+                from litellm.proxy.extensions.chatgpt_subscriptions.policy import cooldown_seconds
+                if exception_status in (401, 403, 408, 429) or (isinstance(exception_status, int) and 500 <= exception_status < 600):
+                    self.cooldown_cache.add_deployment_to_cooldown(
+                        model_id=member["member_id"], original_exception=exception,
+                        exception_status=exception_status,
+                        cooldown_time=cooldown_seconds(self, member["parent"], exception),
+                    )
+                    return True
+                return False
+
             exception_headers: Final = litellm.litellm_core_utils.exception_mapping_utils._get_response_headers(
                 original_exception=exception
             )
@@ -8714,7 +8743,9 @@ class Router:
         )  # handles wildcard routes - by giving the original name sent to `litellm.completion`
         model_group: Final = kwargs["litellm_params"]["metadata"].get("model_group", None)
         model_info: Final = kwargs["litellm_params"].get("model_info", {}) or {}
-        id = model_info.get("id", None)
+        from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_model_id
+
+        id = capacity_model_id(model_info)
         if model_group is None or id is None:
             return
         elif isinstance(id, int):
@@ -9034,6 +9065,9 @@ class Router:
         Raises:
         - Rate Limit Exception - If the deployment is over it's tpm/rpm limits
         """
+        from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_deployment
+
+        deployment = capacity_deployment(deployment)
         for _callback in litellm.callbacks:
             if isinstance(_callback, CustomLogger):
                 _callback.pre_call_check(deployment)
@@ -9055,6 +9089,9 @@ class Router:
         Raises:
         - Rate Limit Exception - If the deployment is over it's tpm/rpm limits
         """
+        from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_deployment
+
+        deployment = capacity_deployment(deployment)
         for _callback in litellm.callbacks:
             if isinstance(_callback, CustomLogger):
                 try:
@@ -12778,6 +12815,10 @@ class Router:
         Returns:
             The appropriate client based on the given client_type and kwargs.
         """
+        if client_type == "max_parallel_requests":
+            from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_deployment
+
+            deployment = capacity_deployment(deployment)
         model_id: Final = deployment["model_info"]["id"]
         parent_otel_span: Final[Span | None] = get_parent_otel_span_from_kwargs(kwargs)
         if client_type == "max_parallel_requests":
@@ -13006,7 +13047,9 @@ class Router:
             except Exception as e:
                 verbose_router_logger.exception("An error occurs - %s", e)
 
-            model_id = _model_info.get("id", "")
+            from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_model_id
+
+            model_id = capacity_model_id(_model_info) or ""
             ## RPM CHECK ##
             ### get local router cache ###
             current_request_cache_local = (
@@ -13497,6 +13540,9 @@ class Router:
             request_kwargs=request_kwargs,
         )
 
+        from litellm.proxy.extensions.chatgpt_subscriptions.expansion import expand_candidates
+        healthy_deployments = await expand_candidates(self, healthy_deployments, request_kwargs)
+
         # IF TEAM ID SPECIFIED ON MODEL, AND REQUEST CONTAINS USER_API_KEY_TEAM_ID, FILTER OUT MODELS THAT ARE NOT IN THE TEAM
         ## THIS PREVENTS WRITING FILES OF OTHER TEAMS TO MODELS THAT ARE TEAM-ONLY MODELS
         healthy_deployments = filter_team_based_models(
@@ -13862,6 +13908,11 @@ class Router:
                 )
                 phase_event(_DEPLOYMENT_SELECTED_EVENT, pick_attributes)
                 return healthy_deployments[0]
+
+            from litellm.proxy.extensions.chatgpt_subscriptions.expansion import choose_managed
+            managed_selection = choose_managed(healthy_deployments, model)
+            if managed_selection is not None:
+                return managed_selection
 
             start_time: Final = time.time()
             if strategy == "simple-shuffle":

@@ -1,4 +1,5 @@
 /* @vitest-environment jsdom */
+import { NuqsTestingAdapter } from "nuqs/adapters/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -61,11 +62,13 @@ const NON_ADMIN = {
 // A proxy_admin_viewer session: effectiveSessionRole masquerades the role as "Admin".
 const VIEW_ONLY_ADMIN = { ...ADMIN, isViewOnly: true };
 
-const renderPage = () => {
+const renderPage = (searchParams = "") => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <ModelsAndEndpointsPage />
+      <NuqsTestingAdapter searchParams={searchParams} hasMemory>
+        <ModelsAndEndpointsPage />
+      </NuqsTestingAdapter>
     </QueryClientProvider>,
   );
 };
@@ -91,7 +94,12 @@ describe("ModelsAndEndpointsPage", () => {
     expect(screen.getByTestId("panel-all-models")).toBeInTheDocument();
   });
 
-  it("switches tabs in-memory, mounting only the active panel", async () => {
+  it("opens the native add form from its tab URL", () => {
+    renderPage("?tab=add");
+    expect(screen.getByTestId("panel-add")).toBeInTheDocument();
+  });
+
+  it("switches tabs through URL state, mounting only the active panel", async () => {
     const user = userEvent.setup();
     renderPage();
     await user.click(screen.getByRole("tab", { name: "Health Status" }));

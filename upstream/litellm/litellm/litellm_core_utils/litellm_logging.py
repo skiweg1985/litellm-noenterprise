@@ -6651,6 +6651,8 @@ def get_standard_logging_object_payload(
         litellm_params: Final = kwargs.get("litellm_params", {}) or {}
         proxy_server_request: Final = litellm_params.get("proxy_server_request") or {}
 
+        from litellm.proxy.extensions.chatgpt_subscriptions.attribution import stamp as stamp_subscription_attempts
+        subscription_fields = stamp_subscription_attempts(logging_obj)
         # Merge both litellm_metadata and metadata to get complete metadata
         metadata: Final[dict] = StandardLoggingPayloadSetup.merge_litellm_metadata(litellm_params)
 
@@ -6670,7 +6672,7 @@ def get_standard_logging_object_payload(
 
         id = response_obj.get("id", kwargs.get("litellm_call_id"))
 
-        _model_id: Final = metadata.get("model_info", {}).get("id", "")
+        _model_id: Final = getattr(logging_obj, "_subscription_parent_model_id", None) or metadata.get("model_info", {}).get("id", "")
         _model_group: Final = metadata.get("model_group", "")
 
         request_tags: Final = StandardLoggingPayloadSetup.get_request_tags(
@@ -6709,6 +6711,7 @@ def get_standard_logging_object_payload(
             response_id=id,
             custom_llm_provider=selected_provider if isinstance(selected_provider, str) else None,
         )
+        clean_metadata.update(subscription_fields)
         _request_body: Final = proxy_server_request.get("body", {})
         end_user_id: Final = clean_metadata["user_api_key_end_user_id"] or _request_body.get(
             "user", None

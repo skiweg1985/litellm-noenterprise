@@ -1,3 +1,4 @@
+import { withSubscriptionSelection } from "../subscriptions/modelAssignment";
 import { toast } from "@/lib/toast";
 import { Model, modelCreateCall } from "../networking";
 import { provider_map } from "../provider_info_helpers";
@@ -88,7 +89,7 @@ export const prepareModelAddRequest = async (formValues: Record<string, any>, ac
       // Iterate through the key-value pairs in formValues
       litellmParamsObj["model"] = mapping.litellm_model;
       for (const [key, value] of Object.entries(formValues)) {
-        if (value === "") {
+        if (key === "subscription_id" || key === "subscription_selection" || value === "") {
           continue;
         }
         if (key === "litellm_credential_name" && value == null) {
@@ -191,7 +192,8 @@ export const prepareModelAddRequest = async (formValues: Record<string, any>, ac
         }
       }
 
-      deployments.push({ litellmParamsObj, modelInfoObj, modelName });
+      const assigned = withSubscriptionSelection(litellmParamsObj, modelInfoObj, formValues.subscription_selection, formValues.subscription_id);
+      deployments.push({ litellmParamsObj: assigned.params, modelInfoObj: assigned.info, modelName });
     }
 
     return deployments;

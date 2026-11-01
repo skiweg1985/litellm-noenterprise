@@ -2,6 +2,7 @@
 """Run public OIDC acceptance tests using isolated Docker fixtures."""
 
 import argparse
+import fnmatch
 import json
 import os
 import subprocess
@@ -17,6 +18,8 @@ parser.add_argument("--browser-admin-disabled", action="store_true")
 parser.add_argument("--reject-missing-master", action="store_true")
 parser.add_argument("--reject-invalid-api", action="store_true")
 parser.add_argument("--test-pattern", default="test*.py")
+parser.add_argument("--proxy-workers", type=int, choices=range(1, 9), default=1, help="Run independent proxy workers against the same synthetic database and registry")
+parser.add_argument("--response-cache", action="store_true", help="Enable local response caching for cache attribution checks")
 parser.add_argument("--api-scope-name", default="api://litellm-api/access")
 parser.add_argument("--api-token-scope", default="access")
 parser.add_argument("--api-audience", default="litellm-api")
@@ -63,6 +66,10 @@ with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
       model: openai/gpt-4o-mini
       api_key: fixture-unused
       mock_response: fixture completion
+  - model_name: fixture-subscription-config
+    litellm_params:
+      model: chatgpt/gpt-5.4
+      api_key: chatgpt-account:default
 mcp_servers:
   fixture:
     url: http://mcp-upstream:8090/mcp
@@ -106,6 +113,7 @@ mcp_servers:
     authorization_url: http://mcp-upstream:8090/oauth/authorize
     token_url: http://mcp-upstream:8090/oauth/token
 general_settings:
+  store_model_in_db: true
   master_key: sk-identity-test-only
   oidc_api:
     resource: http://proxy:4000
@@ -154,6 +162,12 @@ general_settings:
             "master_key: sk-identity-test-only",
             "master_key: " + json.dumps(args.master_key),
         )
+    if args.response_cache:
+        value += "\nlitellm_settings:\n  cache: true\n  cache_params:\n    type: local\n"
+    if fnmatch.fnmatch("test_subscription_headers.py", args.test_pattern):
+        value = value.replace("general_settings:\n", "general_settings:\n  forward_client_headers_to_llm_api: true\n", 1)
+    if args.test_pattern == "test_subscription_capacity.py":
+        value += "\nrouter_settings:\n  enable_pre_call_checks: true\n  optional_pre_call_checks: [enforce_model_rate_limits]\n"
     config.write_text(value)
     if args.reject_missing_master:
         config.write_text(
@@ -209,6 +223,13 @@ general_settings:
             "/work/tests/identity/fixtures/mcp_server.py",
         )
         run(
+            "chatgpt",
+            *(["-p", "127.0.0.1:8091:8091"] if args.browser else []),
+            *mount,
+            "--entrypoint", "python", args.image,
+            "/work/tests/identity/fixtures/chatgpt.py",
+        )
+        run(
             "issuer",
             *(["-p", "127.0.0.1:8080:8080"] if args.browser else []),
             *mount,
@@ -234,6 +255,11 @@ general_settings:
             "LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true",
             "-e",
             "OIDC_TEST_CLIENT_SECRET=fixture-only",
+            "-e", "CHATGPT_AUTH_BASE=http://chatgpt:8091",
+            "-e", "CHATGPT_API_BASE=http://chatgpt:8091",
+            "-e", "CHATGPT_MODELS_URL=http://chatgpt:8091/models",
+            "-e", "CHATGPT_USAGE_URL=http://chatgpt:8091/usage",
+            "-e", "CHATGPT_DEVICE_POLL_MIN_SECONDS=1",
             "-e",
             "LITELLM_OIDC_SESSION_SECRET=fixture-session-secret-32-characters-minimum",
             args.image,
@@ -244,6 +270,8 @@ general_settings:
             "--port",
             "4000",
             "--use_prisma_db_push",
+            "--num_workers",
+            str(args.proxy_workers),
         )
         for _ in range(120):
             result = docker(
@@ -281,6 +309,14 @@ general_settings:
             time.sleep(1)
         else:
             raise RuntimeError("proxy did not become ready")
+        if args.proxy_workers > 1:
+            for _ in range(120):
+                logs = docker("logs", prefix + "-proxy", check=False)
+                if (logs.stdout + logs.stderr).count("Application startup complete") >= args.proxy_workers:
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError("All proxy workers did not become ready")
         if args.browser:
             ui = root / "upstream/litellm/tests/e2e/ui"
             subprocess.run(
@@ -297,7 +333,11 @@ general_settings:
             prefix,
             *mount,
             "-e",
+            "DATABASE_URL=" + database,
+            "-e",
             "EXPECTED_API_SCOPE=" + args.api_scope_name,
+            "-e",
+            "SUBSCRIPTION_CAPACITY_CHECKS=" + str(args.test_pattern == "test_subscription_capacity.py").lower(),
             "-e",
             "EXPECTED_TOKEN_SCOPE=" + args.api_token_scope,
             "-e",
@@ -306,6 +346,8 @@ general_settings:
             "EXPECTED_TOKEN_TYPE=" + args.api_token_type,
             "-e",
             "EXPECTED_MASTER_KEY=" + args.master_key,
+            "-e",
+            "RESPONSE_CACHE_ENABLED=" + str(args.response_cache).lower(),
             "--entrypoint",
             "python",
             args.image,
@@ -323,7 +365,7 @@ general_settings:
         print(result.stderr)
         if result.returncode:
             raise RuntimeError("identity acceptance tests failed")
-        if args.test_pattern in ("test*.py", "test_mcp.py"):
+        if args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py", "test_subscription_reserves.py", "test_subscription_distribution.py"):
             docker("restart", prefix + "-proxy")
             for _ in range(90):
                 ready = docker(
@@ -339,29 +381,28 @@ general_settings:
                 time.sleep(1)
             else:
                 raise RuntimeError("proxy did not restart")
-            persistence = docker(
-                "run",
-                "--rm",
-                "--network",
-                prefix,
-                *mount,
-                "-e",
-                "MCP_RESTART_PHASE=read",
-                "--workdir",
-                "/work/tests/identity",
-                "--entrypoint",
-                "python",
-                args.image,
-                "-m",
-                "unittest",
-                "-v",
-                "test_mcp.PersonalMCPTests.test_connection_survives_cold_restart",
-                check=False,
-            )
-            print(persistence.stdout)
-            print(persistence.stderr)
-            if persistence.returncode:
-                raise RuntimeError("managed MCP cold-restart persistence failed")
+            restart_tests = []
+            if args.test_pattern in ("test*.py", "test_mcp.py"):
+                restart_tests.append("test_mcp.PersonalMCPTests.test_connection_survives_cold_restart")
+            if args.test_pattern in ("test*.py", "test_subscription_models.py"):
+                restart_tests.append("test_subscription_models.SubscriptionModelTests.test_assignment_survives_restart")
+            if args.test_pattern in ("test*.py", "test_subscription_reserves.py"):
+                restart_tests.append("test_subscription_reserves.SubscriptionReserveTests.test_reserve_assignment_survives_restart")
+            if args.test_pattern in ("test*.py", "test_subscription_distribution.py"):
+                restart_tests.append("test_subscription_distribution.SubscriptionDistributionTests.test_distribution_assignment_survives_restart")
+            for test in restart_tests:
+                persistence = docker(
+                    "run", "--rm", "--network", prefix, *mount,
+                    "-e", "MCP_RESTART_PHASE=read",
+                    "-e", "SUBSCRIPTION_RESTART_PHASE=read",
+                    "--workdir", "/work/tests/identity",
+                    "--entrypoint", "python", args.image,
+                    "-m", "unittest", "-v", test, check=False,
+                )
+                print(persistence.stdout)
+                print(persistence.stderr)
+                if persistence.returncode:
+                    raise RuntimeError("cold-restart persistence failed: " + test)
         logs = docker("logs", prefix + "-proxy", check=False)
         if any(
             marker in logs.stdout + logs.stderr

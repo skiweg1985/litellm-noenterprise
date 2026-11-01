@@ -1,5 +1,6 @@
 import { getProxyBaseUrl } from "@/components/networking";
 import { createApiClient } from "./client";
+import type { components } from "./subscriptions-schema";
 
 export interface SubscriptionIdentity {
   email?: string | null;
@@ -13,10 +14,12 @@ export interface QuotaWindow {
   reset_at: number | null;
 }
 
-export interface SubscriptionAccount extends SubscriptionIdentity {
-  account: string;
-  state: string;
-  token_valid: boolean;
+type SubscriptionMetadata = Pick<
+  components["schemas"]["SubscriptionDescription"],
+  "account" | "subscription_id" | "display_name" | "connection_revision" | "retired" | "state" | "token_valid"
+>;
+
+export interface SubscriptionAccount extends SubscriptionIdentity, SubscriptionMetadata {
   token_expires_at: number | null;
   last_refresh_at: number | null;
   auto_login: boolean;
@@ -33,6 +36,7 @@ export interface SubscriptionAccount extends SubscriptionIdentity {
     missing: { model_name: string; slug: string }[];
   } | null;
   available_models_error?: string | null;
+  deployment_ids?: string[];
   credentials: string[];
   models: string[];
   requests_24h: number | null;
@@ -49,7 +53,8 @@ export type SubscriptionAction =
   | "pending/confirm"
   | "pending/discard"
   | "refresh"
-  | "logout";
+  | "logout"
+  | "retire";
 
 const client = createApiClient({ getBaseUrl: () => getProxyBaseUrl() ?? "" });
 const endpoint = "/chatgpt/api/accounts";
@@ -63,4 +68,27 @@ export function updateSubscription(accessToken: string, name: string, action: Su
     accessToken,
     credentials: "same-origin",
   });
+}
+
+export function createSubscription(accessToken: string, displayName: string) {
+  return client.post<SubscriptionAccount>(endpoint, {
+    accessToken,
+    credentials: "same-origin",
+    body: { display_name: displayName } satisfies components["schemas"]["SubscriptionName"],
+  });
+}
+
+export function renameSubscription(accessToken: string, name: string, displayName: string) {
+  return client.patch<SubscriptionAccount>(`${endpoint}/${encodeURIComponent(name)}`, {
+    accessToken,
+    credentials: "same-origin",
+    body: { display_name: displayName } satisfies components["schemas"]["SubscriptionName"],
+  });
+}
+
+export function getSubscriptionAvailability(accessToken: string, modelId: string, signal?: AbortSignal) {
+  return client.get<components["schemas"]["ModelAvailability"]>(
+    `/chatgpt/api/models/${encodeURIComponent(modelId)}/availability`,
+    { accessToken, credentials: "same-origin", signal },
+  );
 }

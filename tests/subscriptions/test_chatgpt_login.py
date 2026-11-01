@@ -311,7 +311,7 @@ class LoginTests(unittest.TestCase):
 
         asyncio.run(run())
         status = account.status()
-        self.assertEqual(tokens.read(self.path), before)
+        self.assertEqual({key: tokens.read(self.path)[key] for key in before}, before)
         self.assertEqual(status["state"], "ok")
         self.assertEqual(status["pending_account"]["email"], "colleague@example.com")
         self.assertEqual(stat.S_IMODE(account.pending_path.stat().st_mode), 0o600)
@@ -489,7 +489,7 @@ class LoginTests(unittest.TestCase):
             with self.assertLogs("chatgpt_subscriptions", "ERROR"):
                 names = [account.name for account in Accounts()]
         self.assertEqual(names, ["default", "team-2"])
-        self.assertEqual([a.name for a in Accounts()], ["default"])
+        self.assertEqual([a.name for a in Accounts()], ["default", "team-2"])  # imported aliases remain durable
         self.assertEqual(Account("team-2").path, Path(self.tmp.name) / "accounts/team-2/auth.json")
         self.assertEqual(Account().path, self.path)
         for key, expected in ((None, None), ("sk-x", None), ("chatgpt-account:team-2", "team-2")):

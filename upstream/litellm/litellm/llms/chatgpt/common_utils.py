@@ -288,3 +288,9 @@ def get_chatgpt_session_id(litellm_params: object) -> str | None:
 
 def ensure_chatgpt_session_id(litellm_params: object) -> str:
     return get_chatgpt_session_id(litellm_params) or str(uuid4())
+
+
+def merge_subscription_headers(trusted: dict, supplied: dict) -> dict:
+    """Only the selected token file may set provider authentication headers."""
+    protected = {"authorization", "chatgpt-account-id"}
+    return {**trusted, **{key: value for key, value in supplied.items() if key.lower() not in protected}}

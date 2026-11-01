@@ -8,16 +8,15 @@ import secrets
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from . import admin
+from . import admin, bulk_assignment, observed_usage
 from .accounts import Accounts
 from .prtg import login_text, render
 from .service import ModelsService, MonitoringError, UsageService
-from .spend_logs import SubscriptionInModelName
 
 OVERVIEW = "/chatgpt/accounts"
 PREFIX = OVERVIEW + "/{name}/usage"
 UNKNOWN = "Unknown ChatGPT account."
-PATHS = (OVERVIEW, PREFIX, PREFIX + "/prtg", admin.PAGE, admin.API)
+PATHS = (OVERVIEW, PREFIX, PREFIX + "/prtg", admin.PAGE, admin.API, observed_usage.API)
 # Fields of an account that the monitoring key may see: no email, no ids.
 OVERVIEW_FIELDS = ("account", "state", "token_valid", "plan", "token_expires_at",
                    "last_refresh_at", "refresh_rejected", "auto_login")
@@ -37,18 +36,6 @@ def require_key(x_monitoring_key: str = Header(default="")):
         raise HTTPException(401, "Invalid monitoring credentials.")
 
 
-def log_subscriptions():
-    """Name the subscription in the request logs; after LiteLLM's own startup,
-    which sets its callbacks from the config."""
-    try:
-        import litellm
-    except ImportError:
-        return None
-    hook = SubscriptionInModelName()
-    litellm.callbacks.append(hook)
-    return hook
-
-
 def watch_with_server(app, accounts):
     """Run the token watcher only while the server runs, not on a mere import."""
     original = app.router.lifespan_context
@@ -57,7 +44,6 @@ def watch_with_server(app, accounts):
     async def lifespan(application):
         async with original(application) as state:
             task = asyncio.ensure_future(accounts.run())
-            hook = log_subscriptions()
             try:
                 yield state
             finally:
@@ -65,11 +51,6 @@ def watch_with_server(app, accounts):
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
                 await accounts.stop_logins()
-                if hook is not None:
-                    import litellm
-
-                    with contextlib.suppress(ValueError):
-                        litellm.callbacks.remove(hook)
 
     app.router.lifespan_context = lifespan
 
@@ -83,19 +64,20 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
         raise RuntimeError("ChatGPT monitoring route collision.")
     accounts = accounts if accounts is not None else Accounts()
     services = services or {
-        account.name: UsageService(account=account.name, path=account.path) for account in accounts
+        account.name: UsageService(account=account.name, path=account.path, transport=account.transport) for account in accounts
     }
     catalogs = catalogs or {
-        account.name: ModelsService(account=account.name, path=account.path) for account in accounts
+        account.name: ModelsService(account=account.name, path=account.path, transport=account.transport) for account in accounts
     }
     router = APIRouter(dependencies=[Depends(require_key)], tags=["ChatGPT monitoring"])
 
     @router.get(OVERVIEW)
     async def overview():
         """Master data and quota of every subscription, for the cost dashboard."""
-        found = deployments()
+        found = await admin.deployment_snapshot(deployments)
         rows = []
         for account in accounts:
+            services.setdefault(account.name, UsageService(account=account.name, path=account.path, transport=account.transport))
             status = account.status()
             own = [d for d in found if d["account"] == account.name and not d["problem"]]
             quota, quota_error = None, None
@@ -117,8 +99,12 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
 
     @router.get(PREFIX)
     async def usage(name: str):
-        if accounts.get(name) is None:
+        account = accounts.get(name)
+        if account is None:
             return JSONResponse({"error": UNKNOWN}, status_code=404, headers={"Cache-Control": "no-store"})
+        if account.retired():
+            raise HTTPException(409, "Subscription is retired.")
+        services.setdefault(name, UsageService(account=name, path=account.path, transport=account.transport))
         try:
             result = await services[name].get()
         except MonitoringError as exc:
@@ -139,8 +125,9 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
         if account is None:
             return JSONResponse({"prtg": {"error": 1, "text": UNKNOWN}}, status_code=404,
                                 headers={"Cache-Control": "no-store"})
+        services.setdefault(name, UsageService(account=name, path=account.path, transport=account.transport))
         status = account.status()
-        broken = admin.problems(deployments())
+        broken = admin.problems(await admin.deployment_snapshot(deployments))
         # Alarm when requests fail now or once the token expires, and while a
         # sign-in with a different account waits for an admin.
         if broken:
@@ -161,6 +148,8 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
         return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
     app.include_router(router)
+    app.include_router(observed_usage.router(accounts, admin_dependency))
+    app.include_router(bulk_assignment.router(accounts, admin_dependency))
     for part in admin.router(accounts, services, admin_dependency, deployments=deployments, catalogs=catalogs):
         app.include_router(part)
     if watch:
