@@ -30,7 +30,7 @@ class SubscriptionDistributionTests(log_tests.SubscriptionLogTests):
 
     def setUp(self):
         super().setUp()
-        self.control(status_by_identity={})
+        self.control(status_by_identity={}, retry_after_by_identity={})
 
     def burst(self, name, count, expected):
         self.control(clear=True)
@@ -77,6 +77,44 @@ class SubscriptionDistributionTests(log_tests.SubscriptionLogTests):
         self.assertEqual(stored[0]['model_info']['id'], model_id)
         self.assertEqual(stored[0]['model_info']['subscription_assignment']['mode'], 'distribution')
         self.assertEqual(stored[0]['model_info']['subscription_assignment']['subscription_ids'], [third['subscription_id']])
+
+    def test_client_errors_exhausted_capacity_and_cooldown_recovery_are_bounded(self):
+        import time
+        first, first_identity = self.connect('CapacityFirst')
+        second, second_identity = self.connect('CapacitySecond')
+        for status in (400, 429):
+            name, created = self.create_distribution([first, second])
+            self.assertEqual(created.status_code, 200, created.text)
+            self.control(status=status, statuses=[], clear=True)
+            response = self.completion(name, num_retries=99,
+                fallbacks=[{name: ['fixture-model']}], disable_fallbacks=False)
+            self.assertGreaterEqual(response.status_code, 400, response.text)
+            actual = self.control()['requests']
+            self.assertEqual(len(actual), 1 if status == 400 else 2, actual)
+            self.assertEqual(len({row['identity'] for row in actual}), len(actual))
+            self.control(status=200)
+        name, created = self.create_distribution([first, second])
+        self.assertEqual(created.status_code, 200, created.text)
+        self.client.patch('/model/' + created.json()['model_id'] + '/update',
+            json={'model_info': {'cooldown_time': 1}}).raise_for_status()
+        self.control(statuses=[429, 200], retry_after_by_identity={first_identity: 2, second_identity: 2}, clear=True)
+        response = self.completion(name)
+        self.assertEqual(response.status_code, 200, response.text)
+        failed, successful = self.control()['requests']
+        self.assertNotEqual(failed['identity'], successful['identity'])
+        self.control(clear=True)
+        immediate = self.completion(name)
+        self.assertEqual(immediate.status_code, 200, immediate.text)
+        self.assertEqual(self.control()['seen'], [successful['identity']])
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            recovered = self.completion(name)
+            self.assertEqual(recovered.status_code, 200, recovered.text)
+            if failed['identity'] in self.control()['seen']:
+                break
+            time.sleep(.1)
+        else:
+            self.fail('Recovered member did not rejoin after its native cooldown')
 
     def test_retry_uses_another_member_and_records_only_actual_attempts(self):
         first, _ = self.connect('RetryFirst')
