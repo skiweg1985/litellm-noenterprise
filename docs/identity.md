@@ -7,8 +7,9 @@ grants and personal MCP connections without enabling premium features.
 ## Configure in the dashboard
 
 Open **Settings → Admin Settings → SSO Settings** as a full proxy administrator.
-Choose **Configure OpenID Connect** and enter the issuer, application ID and
-client secret. Register the displayed callback URL with your provider. The
+Enter the issuer, application ID and client secret in **OpenID Connect**. If
+legacy SSO is configured, first choose **Configure OpenID Connect**. Register the
+displayed callback URL with your provider. The
 **Check provider** action checks discovery compatibility; it does not test the
 credential or complete a user sign-in.
 
@@ -23,7 +24,9 @@ The sections below explain these existing policies in more detail.
 on each proxy worker use the saved configuration; an already running request can
 finish with its original settings. Invalid input, failed discovery or a concurrent
 edit leaves the active setup unchanged. Review a concurrent edit before saving
-again. Material changes require existing OIDC browser users to sign in again.
+again. If the save response is lost, reload the saved settings to confirm whether
+the change was committed; the form retains your unsaved edits until you discard
+them. Material changes require existing OIDC browser users to sign in again.
 A successful save is not proof of interoperability with your provider: complete
 an eligible user login and verify the intended role and API permissions.
 

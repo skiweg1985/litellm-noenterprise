@@ -61,6 +61,8 @@ def run(name, *parts):
 
 
 with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
+    restart_dir = Path(tmp) / "restart"
+    restart_dir.mkdir()
     config = Path(tmp) / "config.yaml"
     config.write_text("""model_list:
   - model_name: fixture-model
@@ -216,7 +218,7 @@ general_settings:
             "--schema=/app/schema.prisma",
             "--skip-generate",
         )
-        mount = ["--mount", f"type=bind,src={root},dst=/work,readonly"]
+        mount = ["--mount", f"type=bind,src={root},dst=/work,readonly", "--mount", f"type=bind,src={restart_dir},dst=/restart"]
         run(
             "mcp-upstream",
             *(["-p", "127.0.0.1:8090:8090"] if args.browser else []),
@@ -263,7 +265,7 @@ general_settings:
             "LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true",
             "-e",
             "OIDC_TEST_CLIENT_SECRET=fixture-only",
-            "-e", "UI_USERNAME=admin", "-e", "UI_PASSWORD=fixture-settings-admin-only",
+            *(["-e", "UI_USERNAME=admin", "-e", "UI_PASSWORD=fixture-settings-admin-only"] if args.oidc_settings else []),
             "-e", "CHATGPT_AUTH_BASE=http://chatgpt:8091",
             "-e", "CHATGPT_API_BASE=http://chatgpt:8091",
             "-e", "CHATGPT_MODELS_URL=http://chatgpt:8091/models",
@@ -281,6 +283,8 @@ general_settings:
             "--use_prisma_db_push",
             "--num_workers",
             str(args.proxy_workers),
+            "--timeout_worker_healthcheck",
+            "60",
         )
         for _ in range(120):
             result = docker(
@@ -376,7 +380,7 @@ general_settings:
         print(result.stderr)
         if result.returncode:
             raise RuntimeError("identity acceptance tests failed")
-        if args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py", "test_subscription_reserves.py", "test_subscription_distribution.py"):
+        if args.oidc_settings or args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py", "test_subscription_reserves.py", "test_subscription_distribution.py"):
             docker("restart", prefix + "-proxy")
             for _ in range(90):
                 ready = docker(
@@ -393,6 +397,8 @@ general_settings:
             else:
                 raise RuntimeError("proxy did not restart")
             restart_tests = []
+            if args.oidc_settings:
+                restart_tests.append("test_oidc_settings.OIDCSettingsTests.test_z_saved_configuration_and_browser_session_survive_cold_restart")
             if args.test_pattern in ("test*.py", "test_mcp.py"):
                 restart_tests.append("test_mcp.PersonalMCPTests.test_connection_survives_cold_restart")
             if args.test_pattern in ("test*.py", "test_subscription_models.py"):
@@ -404,6 +410,9 @@ general_settings:
             for test in restart_tests:
                 persistence = docker(
                     "run", "--rm", "--network", prefix, *mount,
+                    "-e", "OIDC_SETTINGS_MODE=" + str(args.oidc_settings).lower(),
+                    "-e", "OIDC_SETTINGS_RESTART_PHASE=read",
+                    "-e", "EXPECTED_MASTER_KEY=" + args.master_key,
                     "-e", "MCP_RESTART_PHASE=read",
                     "-e", "SUBSCRIPTION_RESTART_PHASE=read",
                     "--workdir", "/work/tests/identity",
@@ -414,6 +423,28 @@ general_settings:
                 print(persistence.stderr)
                 if persistence.returncode:
                     raise RuntimeError("cold-restart persistence failed: " + test)
+        if args.oidc_settings:
+            # Explicit file ownership wins over the still-persisted database setup.
+            config.write_text(config.read_text().replace("general_settings:\n", "general_settings:\n  oidc_identity: null\n", 1))
+            docker("restart", prefix + "-proxy")
+            for _ in range(90):
+                ready = docker("exec", prefix + "-proxy", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')", check=False)
+                if ready.returncode == 0:
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError("proxy did not restart with file ownership")
+            owned = docker(
+                "run", "--rm", "--network", prefix, *mount,
+                "-e", "OIDC_SETTINGS_FILE_NULL=true",
+                "-e", "EXPECTED_MASTER_KEY=" + args.master_key,
+                "--workdir", "/work/tests/identity", "--entrypoint", "python", args.image,
+                "-m", "unittest", "-v", "test_oidc_settings.FileOwnershipTests", check=False,
+            )
+            print(owned.stdout)
+            print(owned.stderr)
+            if owned.returncode:
+                raise RuntimeError("file ownership did not override stored OIDC settings")
         logs = docker("logs", prefix + "-proxy", check=False)
         if any(
             marker in logs.stdout + logs.stderr
@@ -421,6 +452,8 @@ general_settings:
                 "mcp-fixture-access-",
                 "mcp-fixture-refresh-",
                 "client-supplied-sentinel",
+                "secret-invalid-save-sentinel",
+                "rotated-settings-secret-sentinel",
             )
         ):
             raise AssertionError("MCP credential material appeared in proxy logs")

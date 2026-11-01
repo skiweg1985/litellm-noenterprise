@@ -5,6 +5,7 @@ import hashlib
 import json
 import secrets
 import time
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -16,9 +17,16 @@ KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 JWK = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(KEY.public_key()))
 JWK.update(kid="test-key", use="sig", alg="RS256")
 ISSUER = "http://issuer:8080"
-ACTOR = {"sub": "alice", "oid": "stable-alice", "email": "shared@example.test", "roles": ["access"]}
+ACTOR = {
+    "sub": "alice",
+    "oid": "stable-alice",
+    "email": "shared@example.test",
+    "roles": ["access"],
+}
 CODES = {}
 AUTH_METHOD = {"method": "client_secret_post"}
+DISCOVERY_ENTERED = threading.Event()
+DISCOVERY_RELEASE = threading.Event()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -35,31 +43,44 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
+        if url.path == "/control/discovery-state":
+            return self.reply({"waiting": DISCOVERY_ENTERED.is_set()})
         if url.path == "/.well-known/openid-configuration":
-            return self.reply(
-                {
-                    "issuer": ISSUER,
-                    "authorization_endpoint": ISSUER + "/authorize",
-                    "token_endpoint": ISSUER + "/token",
-                    "jwks_uri": ISSUER + "/jwks",
-                    "id_token_signing_alg_values_supported": ["RS256"],
-                    "response_types_supported": ["code"],
-                    "subject_types_supported": ["public"],
-                    "code_challenge_methods_supported": ["S256"],
-                    "token_endpoint_auth_methods_supported": [AUTH_METHOD["method"]],
-                }
-            )
+            if AUTH_METHOD.pop("pause_next_discovery", False):
+                DISCOVERY_ENTERED.set()
+                DISCOVERY_RELEASE.wait(timeout=10)
+            document = {
+                "issuer": ISSUER,
+                "authorization_endpoint": ISSUER + "/authorize",
+                "token_endpoint": ISSUER + "/token",
+                "jwks_uri": ISSUER + "/jwks",
+                "id_token_signing_alg_values_supported": ["RS256"],
+                "response_types_supported": ["code"],
+                "subject_types_supported": ["public"],
+                "code_challenge_methods_supported": ["S256"],
+                "token_endpoint_auth_methods_supported": [AUTH_METHOD["method"]],
+                **AUTH_METHOD.get("metadata", {}),
+            }
+            for name in AUTH_METHOD.get("omit_metadata", []):
+                document.pop(name, None)
+            return self.reply(document)
         if url.path == "/jwks":
             return self.reply({"keys": [JWK]})
         if url.path == "/authorize":
             query = {k: v[0] for k, v in parse_qs(url.query).items()}
-            if query.get("response_type") != "code" or query.get("code_challenge_method") != "S256":
+            if (
+                query.get("response_type") != "code"
+                or query.get("code_challenge_method") != "S256"
+            ):
                 return self.reply({"error": "invalid_request"}, 400)
             code = secrets.token_urlsafe(24)
             CODES[code] = (query, dict(ACTOR))
             self.send_response(302)
             self.send_header(
-                "Location", query["redirect_uri"] + "?" + urlencode({"code": code, "state": query["state"]})
+                "Location",
+                query["redirect_uri"]
+                + "?"
+                + urlencode({"code": code, "state": query["state"]}),
             )
             self.end_headers()
             return
@@ -89,17 +110,33 @@ class Handler(BaseHTTPRequestHandler):
             key = WRONG_KEY if claims.pop("_wrong_key", False) else KEY
             for name in claims.pop("_omit", []):
                 claims.pop(name, None)
-            return self.reply({"access_token": jwt.encode(claims, key, algorithm="RS256", headers=headers)})
+            return self.reply(
+                {
+                    "access_token": jwt.encode(
+                        claims, key, algorithm="RS256", headers=headers
+                    )
+                }
+            )
+        if self.path == "/control/discovery-release":
+            DISCOVERY_RELEASE.set()
+            return self.reply({"ok": True})
         if self.path == "/control/metadata":
-            AUTH_METHOD.update(json.loads(body))
+            update = json.loads(body)
+            if update.get("pause_next_discovery"):
+                DISCOVERY_ENTERED.clear()
+                DISCOVERY_RELEASE.clear()
+            AUTH_METHOD.update(update)
             return self.reply({"ok": True})
         if self.path == "/token":
             data = {k: v[0] for k, v in parse_qs(body.decode()).items()}
-            expected_basic = "Basic " + base64.b64encode(b"litellm-test:fixture-only").decode()
+            expected_basic = (
+                "Basic " + base64.b64encode(b"litellm-test:fixture-only").decode()
+            )
             valid = (
                 self.headers.get("Authorization") == expected_basic
                 if AUTH_METHOD["method"] == "client_secret_basic"
-                else data.get("client_id") == "litellm-test" and data.get("client_secret") == "fixture-only"
+                else data.get("client_id") == "litellm-test"
+                and data.get("client_secret") == "fixture-only"
             )
             if not valid:
                 return self.reply({"error": "invalid_client"}, 401)
@@ -108,11 +145,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply({"error": "invalid_grant"}, 400)
             query, actor = saved
             challenge = (
-                base64.urlsafe_b64encode(hashlib.sha256(data.get("code_verifier", "").encode()).digest())
+                base64.urlsafe_b64encode(
+                    hashlib.sha256(data.get("code_verifier", "").encode()).digest()
+                )
                 .decode()
                 .rstrip("=")
             )
-            if challenge != query["code_challenge"] or data.get("redirect_uri") != query["redirect_uri"]:
+            if (
+                challenge != query["code_challenge"]
+                or data.get("redirect_uri") != query["redirect_uri"]
+            ):
                 return self.reply({"error": "invalid_grant"}, 400)
             claims = {
                 "iss": ISSUER,
