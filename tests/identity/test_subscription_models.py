@@ -1,5 +1,6 @@
 """Subscription model assignment through native model APIs and a synthetic provider."""
 import time
+import json
 import os
 import uuid
 import unittest
@@ -25,9 +26,11 @@ class SubscriptionModelTests(unittest.TestCase):
     def control(self, **values):
         return httpx.post(PROVIDER+'/control', json=values, trust_env=False).json()
 
-    def connect(self, label):
+    def connect(self, label, slugs=None):
         identity = label + '-' + uuid.uuid4().hex[:8]
         self.control(identity=identity)
+        if slugs is not None:
+            self.control(models_by_identity={identity: slugs})
         response = self.client.post('/chatgpt/api/accounts', json={'display_name': label})
         self.assertEqual(response.status_code, 200, response.text)
         account = response.json()
@@ -68,6 +71,42 @@ class SubscriptionModelTests(unittest.TestCase):
         account = self.client.post('/chatgpt/api/accounts', json={'display_name':'Disconnected'}).json()
         _, response = self.create(account)
         self.assertEqual(response.status_code, 409, response.text)
+
+    def test_catalog_only_model_uses_selected_subscription_in_playground_chat(self):
+        self.addCleanup(self.control, models_by_identity={})
+        self.connect('UnassignedCatalog')
+        slug = 'gpt-6.1-catalog-only-synthetic'
+        account, identity = self.connect('SelectedCatalog', [slug])
+        self.assertIsNotNone(account['available_models'], account.get('available_models_error'))
+        name = 'catalog-only-' + uuid.uuid4().hex[:8]
+        created = self.client.post('/model/new', json={
+            'model_name': name,
+            'litellm_params': {'model': 'chatgpt/' + slug, 'custom_llm_provider': 'chatgpt'},
+            'model_info': {'mode': 'chat', 'subscription_assignment': {
+                'mode': 'fixed', 'subscription_ids': [account['subscription_id']],
+            }},
+        })
+        self.assertEqual(created.status_code, 200, created.text)
+        self.models.append(created.json()['model_id'])
+        self.control(clear=True)
+        for streaming in (False, True):
+            with self.subTest(stream=streaming):
+                response = self.client.post('/v1/chat/completions', json={
+                    'model': name, 'messages': [{'role': 'user', 'content': 'Synthetic playground request'}],
+                    'stream': streaming,
+                })
+                self.assertEqual(response.status_code, 200, response.text)
+                if streaming:
+                    chunks = [json.loads(line[6:]) for line in response.text.splitlines()
+                              if line.startswith('data: ') and line != 'data: [DONE]']
+                    content = ''.join(choice['delta'].get('content') or ''
+                                      for chunk in chunks for choice in chunk.get('choices', []))
+                else:
+                    content = response.json()['choices'][0]['message']['content']
+                self.assertEqual(content, 'ok')
+        observed = self.control()
+        self.assertEqual(observed['seen'], [identity, identity])
+        self.assertTrue(all(row['credential_matches'] for row in observed['requests']))
 
     def test_fixed_assignment_cannot_be_overridden_or_fall_back_to_another_model(self):
         account, identity = self.connect('Fixed')

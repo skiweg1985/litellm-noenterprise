@@ -222,6 +222,8 @@ credential is configured in the distributed image.
 
 - ChatGPT accepts the standard client request shape and handles an upstream SSE
   response even when the upstream omits its content type.
+  Chat Completions, including streaming Playground requests, use the subscription's
+  Responses backend even for models available only in its live catalog.
 - Parallel streamed tool calls keep their arguments attached to the correct call.
 - OpenRouter speech requests can use the existing provider speech configuration.
 - An MCP session belonging to another owner is reported as unavailable. Existing
