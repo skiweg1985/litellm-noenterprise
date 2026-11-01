@@ -105,6 +105,73 @@ class RegistryApiTests(unittest.TestCase):
             self.assertFalse(rejected['token_valid'])
             self.assertIsNone(rejected['connection_revision'])
 
+    def test_retry_after_duplicate_during_provider_cleanup_is_not_lost(self):
+        self.retry_during_provider_cleanup()
+
+    def test_other_worker_preserves_retry_after_duplicate_during_provider_cleanup(self):
+        self.retry_during_provider_cleanup(other_worker=True)
+
+    def test_cancel_fences_retry_queued_during_provider_cleanup(self):
+        self.retry_during_provider_cleanup(cancel=True)
+
+    def test_other_worker_cancel_fences_retry_queued_during_provider_cleanup(self):
+        self.retry_during_provider_cleanup(cancel=True, remote_cancel=True)
+
+    def retry_during_provider_cleanup(self, other_worker=False, cancel=False, remote_cancel=False):
+        import asyncio
+        import threading
+
+        provider = FakeAuth()
+        closing, release = threading.Event(), threading.Event()
+
+        class ProviderTransport(httpx.MockTransport):
+            """Keep the rejected provider connection closing until the retry arrives."""
+            gate_cleanup = False
+            exchange_task = None
+
+            async def handle_async_request(self, request):
+                if request.url.path == '/oauth/token':
+                    self.exchange_task = asyncio.current_task()
+                return await super().handle_async_request(request)
+
+            async def aclose(self):
+                if self.gate_cleanup and asyncio.current_task() is self.exchange_task:
+                    closing.set()
+                    while not release.is_set():
+                        await asyncio.sleep(0.01)
+                await super().aclose()
+
+        transport = ProviderTransport(provider)
+        with self.client(transport) as client, self.client(httpx.MockTransport(provider)) as worker:
+            first = client.post('/chatgpt/api/accounts', json={'display_name': 'First'}).json()['account']
+            second = client.post('/chatgpt/api/accounts', json={'display_name': 'Second'}).json()['account']
+            client.post('/chatgpt/api/accounts/' + first + '/login')
+            self.wait_account(client, first, lambda a: a['token_valid'] and a['login'] is None)
+            transport.gate_cleanup = True
+            endpoint = '/chatgpt/api/accounts/' + second + '/login'
+            client.post(endpoint)
+            try:
+                self.assertTrue(closing.wait(6), 'Provider connection did not reach cleanup')
+                rejected = self.wait_account(client, second, lambda a: a['error'])
+                self.assertEqual(rejected['error']['code'], 'duplicate_account')
+                provider.user, provider.email = 'second-person', 'second@example.test'
+                retry_client = worker if other_worker else client
+                self.assertEqual(retry_client.post(endpoint).status_code, 200)
+                if cancel:
+                    cancelling_client = worker if remote_cancel else client
+                    self.assertEqual(cancelling_client.post(endpoint + '/cancel').status_code, 200)
+            finally:
+                release.set()
+            if cancel:
+                cancelled = self.wait_account(client, second, lambda a: a['state'] == 'logged_out')
+                self.assertFalse(cancelled['token_valid'])
+                self.assertIsNone(cancelled['login'])
+                self.assertEqual(provider.calls.count('/api/accounts/deviceauth/usercode'), 2)
+                return
+            connected = self.wait_account(client, second, lambda a: a['token_valid'])
+            self.assertEqual(connected['email'], 'second@example.test')
+            self.assertIsNone(connected['error'])
+
     def test_nondefault_legacy_accounts_share_the_request_registry(self):
         from pathlib import Path
         from litellm.llms.chatgpt.authenticator import Authenticator
