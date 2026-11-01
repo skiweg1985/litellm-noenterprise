@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -290,7 +292,7 @@ async def commit_bundle(bundle: StoredBundle, expected_revision: int):
     try:
         saved = await repository().set_param_if_revision(SETTINGS_KEY, bundle.model_dump(mode="json"), expected_revision)
     except Exception:
-        problem(503, "configuration_unavailable", "OIDC settings could not be saved. The active configuration was not changed.")
+        problem(503, "configuration_unavailable", "The save could not be confirmed. Reload settings to check the active configuration.")
     if not saved:
         problem(409, "revision_conflict", "Settings changed while you were editing. Reload and review them.")
 
@@ -343,14 +345,12 @@ async def disable_settings(data: DisableSettingsRequest, response: Response, aut
     await commit_bundle(disabled, data.expected_revision)
     return SaveSettingsResponse(**(await describe(disabled)).model_dump(), sessions_invalidated=True)
 
-from contextvars import ContextVar
-from dataclasses import dataclass
-
 
 @dataclass(frozen=True)
 class RuntimeSnapshot:
     browser: OIDCSettings | None
     api: APISettings | None
+    error: HTTPException | None = None
 
 
 current_snapshot: ContextVar[RuntimeSnapshot | None] = ContextVar("independent_oidc_snapshot", default=None)
@@ -381,32 +381,24 @@ async def load_snapshot() -> RuntimeSnapshot:
 
 
 class OIDCSettingsMiddleware:
-    """Pin one writer-backed snapshot only for OIDC security-relevant requests."""
+    """Pin one authoritative bundle for auth and downstream MCP execution.
+
+    An unavailable bundle is retained as an error, never interpreted as disabled.
+    Its consumers fail closed while native administration can still recover.
+    """
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        from litellm.proxy.proxy_server import general_settings, master_key
-        from starlette.datastructures import Headers
-        import secrets
         path = scope.get("path", "").rstrip("/")
-        headers = Headers(scope=scope)
-        names = ("authorization", "x-litellm-api-key", "api-key", "x-api-key", str(general_settings.get("litellm_key_header_name") or "authorization"))
-        keys = [headers.get(name, "").removeprefix("Bearer ").strip() for name in names]
-        native_master = isinstance(master_key, str) and any(secrets.compare_digest(value.encode(), master_key.encode()) for value in keys if value)
-        oidc_token = not native_master and any(value == "oidc-browser-session" or (not value.startswith("sk-") and value.count(".") == 2) for value in keys)
-        identity_route = path in ("/oidc/login", "/oidc/callback", "/oidc/session", "/oidc/logout", "/sso/key/generate")
-        metadata_route = path.startswith("/.well-known/")
-        mcp_route = "mcp" in path.split("/")
-        if not (oidc_token or identity_route or metadata_route or mcp_route):
+        if path == "/health/liveliness" or path == "/ui" or path.startswith("/ui/"):
             return await self.app(scope, receive, send)
         try:
             snapshot = await load_snapshot()
         except HTTPException as exc:
-            response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers={"Cache-Control": "no-store"})
-            return await response(scope, receive, send)
+            snapshot = RuntimeSnapshot(None, None, error=exc)
         token = current_snapshot.set(snapshot)
         try:
             return await self.app(scope, receive, send)

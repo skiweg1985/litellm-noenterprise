@@ -114,7 +114,10 @@ class OIDCSettings(BaseModel):
 
     @property
     def fingerprint(self) -> str:
-        return hashlib.sha256((self.model_dump_json() + "\0" + str(self._active_revision)).encode()).hexdigest()
+        value = self.model_dump_json()
+        if self._active_revision:
+            value += "\0" + str(self._active_revision)
+        return hashlib.sha256(value.encode()).hexdigest()
 
     def role_for(self, claims: dict[str, Any]) -> str:
         return next(
@@ -134,6 +137,8 @@ def settings() -> OIDCSettings | None:
     from litellm.proxy.auth.oidc_settings import current_snapshot
     snapshot = current_snapshot.get()
     if snapshot is not None:
+        if snapshot.error is not None:
+            raise snapshot.error
         return snapshot.browser
     value = general_settings.get("oidc_identity")
     if value is None:
