@@ -21,8 +21,9 @@ options expose claim formats, stable identity, token types and session lifetime.
 The sections below explain these existing policies in more detail.
 
 **Save changes** validates and activates the complete setup. Subsequent requests
-on each proxy worker use the saved configuration; an already running request can
-finish with its original settings. Invalid input, failed discovery or a concurrent
+on each proxy worker, including later tool calls in existing MCP sessions, use
+the saved configuration. An operation already in progress can finish with its
+original settings. Invalid input, failed discovery or a concurrent
 edit leaves the active setup unchanged. Review a concurrent edit before saving
 again. If the save response is lost, reload the saved settings to confirm whether
 the change was committed; the form retains your unsaved edits until you discard
@@ -32,7 +33,8 @@ an eligible user login and verify the intended role and API permissions.
 
 Database-managed client and session secrets are encrypted using LiteLLM's existing
 credential encryption. Keep `LITELLM_SALT_KEY` stable across replicas and backups;
-when absent, the existing encryption helper uses the master key. The database,
+when absent, the existing encryption helper uses the master key. An explicitly
+empty encryption key is rejected before settings can be saved. The database,
 master key and compatible authentication configuration must be available before
 setup. The session secret is generated once and retained across ordinary saves.
 The form reports whether a secret exists and never displays its value. Leave the

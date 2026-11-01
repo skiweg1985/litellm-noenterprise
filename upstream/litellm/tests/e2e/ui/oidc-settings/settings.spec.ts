@@ -172,7 +172,17 @@ test("native SSO form activates complete OIDC policy and preserves it across con
       await route.continue();
       return;
     }
-    await route.fetch();
+    try {
+      const forwarded = await route.fetch({
+        url: route.request().url().replace("//proxy:", "//127.0.0.1:"),
+      });
+      expect(forwarded.status()).toBe(200);
+    } catch {
+      await route.abort("failed");
+      throw new Error(
+        "The controlled save could not be forwarded to the isolated proxy.",
+      );
+    }
     await route.abort("connectionreset");
   });
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
@@ -256,5 +266,55 @@ test("native SSO form activates complete OIDC policy and preserves it across con
       ).status,
   );
   expect(admitted).toBe(200);
+  await oidcPage.goto(`${process.env.UI_PROXY_URL}/ui/admin-panel/`);
+  await oidcPage
+    .getByRole("tab", { name: "SSO Settings", exact: true })
+    .click();
+  await oidcPage
+    .getByLabel("Session lifetime in seconds", { exact: true })
+    .fill("6000");
+  await oidcPage
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(
+    oidcPage.getByRole("link", { name: "Sign in again", exact: true }),
+  ).toBeVisible();
+  await oidcPage
+    .getByRole("link", { name: "Sign in again", exact: true })
+    .click();
+  await expect(oidcPage).toHaveURL(/\/ui/);
+  await oidcPage.goto(`${process.env.UI_PROXY_URL}/ui/admin-panel/`);
+  await oidcPage
+    .getByRole("tab", { name: "SSO Settings", exact: true })
+    .click();
+  await oidcPage
+    .getByRole("button", { name: "Disable OpenID Connect", exact: true })
+    .click();
+  await oidcPage
+    .getByRole("button", { name: "Confirm disable", exact: true })
+    .click();
+  await expect(
+    oidcPage.getByRole("link", {
+      name: "Sign in with a native administrator account",
+      exact: true,
+    }),
+  ).toHaveAttribute("href", "/fallback/login");
   await oidcContext.close();
+  const disabled = await request
+    .get(`${proxyHTTP}/oidc/settings`, { headers: adminHeaders })
+    .then((r) => r.json());
+  expect(disabled.enabled).toBe(false);
+  // Native administrator recovery remains able to re-enable the retained setup.
+  expect(
+    (
+      await request.put(`${proxyHTTP}/oidc/settings`, {
+        headers: adminHeaders,
+        data: {
+          expected_revision: disabled.revision,
+          browser: disabled.browser,
+          api: disabled.api,
+        },
+      })
+    ).status(),
+  ).toBe(200);
 });
