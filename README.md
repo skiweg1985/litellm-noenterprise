@@ -9,7 +9,8 @@ is **LiteLLM 1.106.6**.
 The reviewed upstream snapshot and independent build tooling are implemented.
 The dashboard is rebuilt from source. [Generic OIDC identity](docs/identity.md)
 now supports browser sessions and provider-token API access with claim-based
-admission, stable accounts, and ordered role mapping. Discovery metadata and
+admission, stable accounts, and ordered role mapping. Configure it in
+**Admin Settings → SSO Settings**, or use deployment files. Discovery metadata and
 API-token scopes share one configuration. Personal MCP connections reuse the
 existing managed OAuth and client-supplied modes with per-server claim rules,
 protected persistent credentials, refresh and disconnect. The existing
@@ -23,7 +24,8 @@ model creation with fixed subscriptions, ordered reserves or distributed request
 optional bulk assignment with a review of each change,
 per-attempt subscription logs, observed usage by subscription and connection revision,
 quota monitoring, provider compatibility fixes,
-parallel streamed tool-call handling and an optional OpenRouter classifier.
+parallel streamed tool-call handling, OpenRouter native image generation in the
+Playground, and an optional OpenRouter classifier.
 No subscription or external deployment is configured by default.
 
 ## Build and verify
