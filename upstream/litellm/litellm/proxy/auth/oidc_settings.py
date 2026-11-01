@@ -561,10 +561,20 @@ async def save_settings(
     data: SaveSettingsRequest, response: Response, auth=Depends(require_admin)
 ):
     import secrets
-    from litellm.proxy.common_utils.encrypt_decrypt_utils import encrypt_value_helper
+    from litellm.proxy.common_utils.encrypt_decrypt_utils import (
+        encrypt_value_helper,
+        get_salt_key,
+    )
 
     response.headers["Cache-Control"] = "no-store"
     writable()
+    encryption_key = get_salt_key()
+    if not isinstance(encryption_key, str) or not encryption_key:
+        problem(
+            503,
+            "prerequisite_missing",
+            "OIDC requires a non-empty encryption key. Check LITELLM_SALT_KEY or the master key.",
+        )
     current = await read_bundle()
     check_revision(data.expected_revision, current)
     browser = OIDCSettings.model_validate(

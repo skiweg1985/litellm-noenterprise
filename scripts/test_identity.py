@@ -15,6 +15,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("image", default="litellm-noenterprise:baseline", nargs="?")
 parser.add_argument("--browser", action="store_true", help="Run the personal UI browser journeys on loopback ports 4000, 8080, 8090")
 parser.add_argument("--oidc-settings", action="store_true", help="Start without file-owned OIDC for settings acceptance")
+parser.add_argument("--oidc-empty-salt", action="store_true", help="Test rejected OIDC settings saves with an explicitly empty encryption key")
 parser.add_argument("--browser-proxy-port", type=int, default=4000, help="Loopback browser port; 0 chooses an available port")
 parser.add_argument("--browser-admin-disabled", action="store_true")
 parser.add_argument("--reject-missing-master", action="store_true")
@@ -33,6 +34,8 @@ parser.add_argument(
     help="Development only: run mounted source instead of installed image code",
 )
 args = parser.parse_args()
+if args.oidc_empty_salt and (not args.oidc_settings or args.browser):
+    parser.error("--oidc-empty-salt requires --oidc-settings without --browser")
 root = Path(__file__).resolve().parents[1]
 prefix = "litellm-ne-identity-" + uuid.uuid4().hex[:8]
 containers = []
@@ -265,6 +268,7 @@ general_settings:
             "LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true",
             "-e",
             "OIDC_TEST_CLIENT_SECRET=fixture-only",
+            *(["-e", "LITELLM_SALT_KEY="] if args.oidc_empty_salt else []),
             *(["-e", "UI_USERNAME=admin", "-e", "UI_PASSWORD=fixture-settings-admin-only"] if args.oidc_settings else []),
             "-e", "CHATGPT_AUTH_BASE=http://chatgpt:8091",
             "-e", "CHATGPT_API_BASE=http://chatgpt:8091",
@@ -349,6 +353,7 @@ general_settings:
             "-e",
             "DATABASE_URL=" + database,
             "-e", "OIDC_SETTINGS_MODE=" + str(args.oidc_settings).lower(),
+            "-e", "OIDC_EMPTY_SALT_MODE=" + str(args.oidc_empty_salt).lower(),
             "-e",
             "EXPECTED_API_SCOPE=" + args.api_scope_name,
             "-e",
@@ -380,7 +385,7 @@ general_settings:
         print(result.stderr)
         if result.returncode:
             raise RuntimeError("identity acceptance tests failed")
-        if args.oidc_settings or args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py", "test_subscription_reserves.py", "test_subscription_distribution.py"):
+        if not args.oidc_empty_salt and (args.oidc_settings or args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py", "test_subscription_reserves.py", "test_subscription_distribution.py")):
             docker("restart", prefix + "-proxy")
             for _ in range(90):
                 ready = docker(
@@ -423,7 +428,7 @@ general_settings:
                 print(persistence.stderr)
                 if persistence.returncode:
                     raise RuntimeError("cold-restart persistence failed: " + test)
-        if args.oidc_settings:
+        if args.oidc_settings and not args.oidc_empty_salt:
             # Explicit file ownership wins over the still-persisted database setup.
             config.write_text(config.read_text().replace("general_settings:\n", "general_settings:\n  oidc_identity: null\n", 1))
             docker("restart", prefix + "-proxy")
@@ -453,6 +458,7 @@ general_settings:
                 "mcp-fixture-refresh-",
                 "client-supplied-sentinel",
                 "secret-invalid-save-sentinel",
+                "empty-key-save-secret-sentinel",
                 "rotated-settings-secret-sentinel",
             )
         ):
