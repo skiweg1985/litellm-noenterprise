@@ -316,6 +316,8 @@ general_settings:
             prefix,
             *mount,
             "-e",
+            "DATABASE_URL=" + database,
+            "-e",
             "EXPECTED_API_SCOPE=" + args.api_scope_name,
             "-e",
             "EXPECTED_TOKEN_SCOPE=" + args.api_token_scope,
