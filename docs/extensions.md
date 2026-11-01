@@ -122,19 +122,11 @@ subscription equal preference through LiteLLM's native random selection. Counts
 can differ; this policy does not measure remaining quota or promise equal totals.
 The choice applies to this model and leaves global routing unchanged.
 
-Disconnected and retired subscriptions are skipped. A temporarily unavailable
-member can rejoin when its cooldown ends; reconnecting an account makes it eligible
-again. Cooldowns use the existing router cache: configure its Redis backend when
-workers must share cooldown state; otherwise each worker tracks its own cooldowns.
-Editing the membership changes which accounts new requests may use. The same editor also offers a fixed account or an ordered preferred account with
-reserves; distribution ignores list order.
-
-Transient failures can retry another eligible member before content is returned.
-Each member is attempted at most once for that request. Invalid client requests
-are not retried across the list. Exhausted capacity returns an error, and an
-interrupted or cancelled stream does not start another provider attempt. Request
-logs identify actual attempts; skipped members and cache-only results do not
-create provider-attempt records.
+The availability, cooldown and stream rules above apply to distribution too.
+Recovered members can rejoin. Editing membership changes which accounts new
+requests may use. The same editor also offers a fixed account or an ordered
+preferred account with reserves; distribution ignores list order. Cross-member
+attempts in distribution are recorded as retries rather than reserve switches.
 
 ## Find subscription requests
 

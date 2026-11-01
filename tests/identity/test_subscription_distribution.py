@@ -1,5 +1,6 @@
 """Distributed subscription models through native CRUD, inference and log APIs."""
 import concurrent.futures
+import json
 import os
 import time
 import unittest
@@ -33,7 +34,7 @@ class SubscriptionDistributionTests(log_tests.SubscriptionLogTests):
 
     def setUp(self):
         super().setUp()
-        self.control(status_by_identity={}, retry_after_by_identity={})
+        self.control(status_by_identity={}, retry_after_by_identity={}, models_by_identity={}, stream_error_at=3)
 
     def burst(self, name, count, expected):
         self.control(clear=True)
@@ -80,6 +81,61 @@ class SubscriptionDistributionTests(log_tests.SubscriptionLogTests):
         self.assertEqual(stored[0]['model_info']['id'], model_id)
         self.assertEqual(stored[0]['model_info']['subscription_assignment']['mode'], 'distribution')
         self.assertEqual(stored[0]['model_info']['subscription_assignment']['subscription_ids'], [third['subscription_id']])
+
+    def test_every_member_catalog_is_validated_before_create_or_membership_edit(self):
+        first, first_identity = self.connect('CatalogDistributionFirst')
+        second, second_identity = self.connect('CatalogDistributionSecond')
+        self.control(models_by_identity={second_identity: []})
+        denied_name, rejected = self.create_distribution([first, second])
+        self.assertEqual(rejected.status_code, 400, rejected.text)
+        self.assertFalse(any(row['model_name'] == denied_name
+            for row in self.client.get('/v1/model/info').json()['data']))
+        name, created = self.create_distribution([first])
+        self.assertEqual(created.status_code, 200, created.text)
+        model_id = created.json()['model_id']
+        rejected = self.client.patch('/model/' + model_id + '/update', json={
+            'model_info': {'subscription_assignment': {'mode': 'distribution',
+                'subscription_ids': [first['subscription_id'], second['subscription_id']]}}
+        })
+        self.assertEqual(rejected.status_code, 400, rejected.text)
+        stored = next(row for row in self.client.get('/v1/model/info').json()['data']
+                      if row['model_info']['id'] == model_id)
+        self.assertEqual(stored['model_info']['subscription_assignment']['subscription_ids'], [first['subscription_id']])
+        self.burst(name, 2, [first_identity])
+        self.control(models_by_identity={})
+
+    def test_stream_failure_or_cancellation_after_content_does_not_switch_members(self):
+        first, _ = self.connect('StreamDistributionFirst')
+        second, _ = self.connect('StreamDistributionSecond')
+        for surface in ('responses', 'chat/completions'):
+            for mode in ('failure', 'cancelled'):
+                with self.subTest(surface=surface, mode=mode):
+                    name, created = self.create_distribution([first, second])
+                    self.assertEqual(created.status_code, 200, created.text)
+                    self.control(stream_error=mode == 'failure', stream_error_at=6, delay=.1, clear=True)
+                    body = {'model': name, 'stream': True, 'num_retries': 99}
+                    body.update({'input': 'Interrupted distribution'} if surface == 'responses' else
+                        {'messages': [{'role': 'user', 'content': 'Interrupted distribution'}]})
+                    content_seen = False
+                    with self.client.stream('POST', '/v1/' + surface, json=body) as response:
+                        self.assertEqual(response.status_code, 200)
+                        for line in response.iter_lines():
+                            if line.startswith('data: ') and line != 'data: [DONE]':
+                                event = json.loads(line[6:])
+                                content = event.get('delta') if surface == 'responses' else next(
+                                    (choice.get('delta', {}).get('content') for choice in event.get('choices', [])
+                                     if choice.get('delta', {}).get('content')), None)
+                                if content == 'ok':
+                                    content_seen = True
+                                    if mode == 'cancelled':
+                                        break
+                    self.assertTrue(content_seen, 'Synthetic text must reach the client before failure or cancellation')
+                    row = self.wait_logs(name)['data'][0]
+                    attempts = row['metadata']['subscription_attempts']
+                    self.assertEqual(len(attempts), 1, row)
+                    self.assertEqual(attempts[0]['outcome'], mode, row)
+                    self.assertEqual(len(self.control()['requests']), 1)
+                    self.control(stream_error=False, delay=0)
 
     @unittest.skipUnless(os.getenv('RESPONSE_CACHE_ENABLED') == 'true', 'requires isolated response cache')
     def test_cached_distribution_does_not_report_selected_candidates_as_attempts(self):

@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 
 app = FastAPI()
-state = {"identity": "seat-a", "catalog_error": False, "status": 200, "seen": [], "statuses": [], "stream_error": False, "stream_error_at": 3, "delay": 0, "status_by_identity": {}, "retry_after_by_identity": {}, "requests": []}
+state = {"identity": "seat-a", "catalog_error": False, "status": 200, "seen": [], "statuses": [], "stream_error": False, "stream_error_at": 3, "delay": 0, "status_by_identity": {}, "retry_after_by_identity": {}, "models_by_identity": {}, "active": 0, "peak_active": 0, "requests": []}
 codes = {}
 fixtures = json.loads((Path(__file__).parents[2] / "deployment_patches/fixtures/chatgpt_sse.json").read_text())
 
@@ -23,12 +23,13 @@ def jwt(identity):
 @app.post('/control')
 async def control(request: Request):
     changes = await request.json()
-    for key in ('identity', 'catalog_error', 'status', 'statuses', 'stream_error', 'stream_error_at', 'delay', 'status_by_identity', 'retry_after_by_identity'):
+    for key in ('identity', 'catalog_error', 'status', 'statuses', 'stream_error', 'stream_error_at', 'delay', 'status_by_identity', 'retry_after_by_identity', 'models_by_identity'):
         if key in changes:
             state[key] = changes[key]
     if changes.get('clear'):
         state['seen'] = []
         state['requests'] = []
+        state['peak_active'] = state['active']
     return state
 
 @app.get('/control')
@@ -58,10 +59,11 @@ async def token(request: Request):
     return {"access_token": value, "id_token": value, "refresh_token": 'refresh-' + identity}
 
 @app.get('/models')
-async def models():
+async def models(request: Request):
     if state['catalog_error']:
         return JSONResponse({"error": "Synthetic catalog unavailable"}, status_code=503)
-    return {"models": [{"slug": "gpt-5.4", "display_name": "Synthetic GPT", "visibility": "list", "priority": 1, "context_window": 272000, "supported_reasoning_levels": []}]}
+    slugs = state['models_by_identity'].get(request.headers.get('chatgpt-account-id'), ['gpt-5.4'])
+    return {"models": [{"slug": slug, "display_name": "Synthetic GPT", "visibility": "list", "priority": 1, "context_window": 272000, "supported_reasoning_levels": []} for slug in slugs]}
 
 @app.get('/usage')
 async def usage():
@@ -96,13 +98,18 @@ async def responses(request: Request):
     stream_error, delay = state['stream_error'], state['delay']
     error_at = state['stream_error_at']
     async def stream():
-        for i, event in enumerate(events):
-            if delay:
-                await asyncio.sleep(delay)
-            if stream_error and i == error_at:
-                yield 'event: error\ndata: {"type":"error","code":"server_error","message":"Synthetic interrupted stream"}\n\n'
-                return
-            yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+        state['active'] += 1
+        state['peak_active'] = max(state['peak_active'], state['active'])
+        try:
+            for i, event in enumerate(events):
+                if delay:
+                    await asyncio.sleep(delay)
+                if stream_error and i == error_at:
+                    yield 'event: error\ndata: {"type":"error","code":"server_error","message":"Synthetic interrupted stream"}\n\n'
+                    return
+                yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+        finally:
+            state['active'] -= 1
     return StreamingResponse(stream(), media_type='text/event-stream')
 
 uvicorn.run(app, host='0.0.0.0', port=8091, log_level='warning')
