@@ -22,7 +22,7 @@ test("administrators create and reorder a preferred subscription with reserves i
     for (const suffix of ["Preferred", "Reserve"]) {
       const label = `${suffix} ${marker}`;
       expect((await request.post("http://127.0.0.1:8091/control", {
-        data: { identity: label, catalog_error: false, status: 200, statuses: [], stream_error: false, delay: 0 },
+        data: { identity: `${suffix.toLowerCase()}-${marker}`, catalog_error: false, status: 200, statuses: [], status_by_identity: {}, models_by_identity: {}, stream_error: false, delay: 0 },
       })).ok()).toBe(true);
       const created = await api("/chatgpt/api/accounts", "POST", { display_name: label });
       expect(created.status).toBe(200);
