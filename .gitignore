@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+node_modules
+.next/
+.build/
+
+upstream/litellm/ui/litellm-dashboard/out/
+upstream/litellm/ui/litellm-dashboard/next-env.d.ts
+upstream/litellm/tests/e2e/ui/test-results/
+
+*.tsbuildinfo

@@ -1,0 +1,12 @@
+.git
+.venv
+**/__pycache__
+**/node_modules
+**/.next
+.build
+.env
+upstream/litellm/tests
+upstream/litellm/litellm-rust
+
+upstream/litellm/ui/litellm-dashboard/out
+upstream/litellm/ui/litellm-dashboard/next-env.d.ts
