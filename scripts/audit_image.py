@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Inspect every exported image layer and installed distributions for LiteLLM enterprise code."""
+import argparse
+import json
+import re
+import subprocess
+import tarfile
+import tempfile
+from pathlib import Path
+
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('image')
+args=parser.parse_args()
+forbidden=re.compile(r'(^|/)(litellm_enterprise(?:-[^/]+\.dist-info)?|litellm-enterprise)(/|$)|(^|/)(app|build/package|build)/enterprise(/|$)|site-packages/enterprise(/|$)|litellm/proxy/enterprise(/|$)')
+with tempfile.TemporaryDirectory(prefix='litellm-image-audit-') as tmp:
+    archive=Path(tmp)/'image.tar'
+    subprocess.run(['docker','image','save',args.image,'-o',str(archive)],check=True)
+    count=0
+    with tarfile.open(archive) as outer:
+        manifest=json.load(outer.extractfile('manifest.json'))
+        for layer in dict.fromkeys(layer for image in manifest for layer in image['Layers']):
+            with tarfile.open(fileobj=outer.extractfile(layer),mode='r|*') as entries:
+                for item in entries:
+                    assert not forbidden.search(item.name),f'Excluded content in image layer: {item.name}'
+            count+=1
+script="""import importlib.metadata as m, importlib.util as u
+names={d.metadata['Name'].lower().replace('_','-') for d in m.distributions()}
+assert 'litellm-enterprise' not in names
+assert u.find_spec('litellm_enterprise') is None
+assert u.find_spec('enterprise') is None
+assert m.version('litellm') == '1.106.6'
+from importlib.resources import files
+assert (files('litellm')/'proxy/_experimental/out/connect/index.html').is_file()
+assert (files('litellm')/'litellm_core_utils/audio_utils/audio_health_check.wav').is_file()
+print('Installed distributions and rebuilt runtime assets verified')
+"""
+subprocess.run(['docker','run','--rm','--network','none','--entrypoint','python',args.image,'-c',script],check=True)
+print(f'PASS: {count} image layers contain no excluded LiteLLM enterprise package paths')

@@ -1794,6 +1794,11 @@ class ComplexityRouterConfig(LiteLLMBaseModel):
 
     @model_validator(mode="after")
     def _validate_capability_classifier_config(self) -> "ComplexityRouterConfig":
+        if self.classifier_type == "capability":
+            from importlib.util import find_spec
+
+            if find_spec("litellm.router_strategy.complexity_router.capability_classifier") is None:
+                raise ValueError("The capability classifier is not included in the MIT-only source distribution")
         capability: Final = self.capability_classifier_config
         if self.classifier_type != "capability":
             if capability is not None:

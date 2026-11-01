@@ -88,13 +88,12 @@ from litellm.types.utils import (
     StandardLoggingRoutingDecisionTierBoundaries,
 )
 
-from .capability_classifier import (
-    CapabilityClassifierForecast,
-    capability_classifier_response_format,
-    capability_classifier_system_prompt,
-    extract_classifier_json,
-    parse_capability_classifier_verdict,
-)
+# The separately licensed capability classifier is optional in this distribution.
+# Keep its imports inside that feature; normal proxy/routing startup must not load it.
+if TYPE_CHECKING:
+    from .capability_classifier import CapabilityClassifierForecast
+
+from litellm.llms.ollama.completion.transformation import _strip_json_code_fence
 from .classification_rubrics import BUSINESS_TIER_CRITERIA, calibration_examples_section
 from .config import (
     CALIBRATION_EXAMPLES_HEADING,
@@ -1484,6 +1483,8 @@ class ComplexityRouter(CustomLogger):
             self._build_classifier_system_prompt() if llm_classifier_configured else None
         )
         capability_config: Final = self.config.capability_classifier_config
+        if self.config.classifier_type == "capability":
+            from .capability_classifier import capability_classifier_response_format
         self._classifier_response_format: Mapping[str, object] | None = (
             (
                 capability_classifier_response_format(
@@ -1535,6 +1536,8 @@ class ComplexityRouter(CustomLogger):
         if llm_config is None:
             raise ValueError("classifier_llm_config is not set")
         if self.config.classifier_type == "capability":
+            from .capability_classifier import capability_classifier_system_prompt
+
             capability: Final = self.config.capability_classifier_config
             return capability_classifier_system_prompt(
                 capability.response_format if capability is not None else "json_schema"
@@ -2642,7 +2645,7 @@ class ComplexityRouter(CustomLogger):
             messages_for_call, request_kwargs, encrypted_task=encrypted_task
         )
         try:
-            raw_tier: Final = _LabeledTierClassification.model_validate_json(extract_classifier_json(content)).tier
+            raw_tier: Final = _LabeledTierClassification.model_validate_json(_strip_json_code_fence(content)).tier
         except ValidationError as error:
             _log_rejected_classifier_verdict(error, content, request_kwargs)
             raise
@@ -2658,6 +2661,8 @@ class ComplexityRouter(CustomLogger):
         messages: Sequence[Mapping[str, object]] | None,
     ) -> tuple[ComplexityTier, float | None, CapabilityClassifierForecast]:
         """Call the packaged capability forecaster and apply its two-tier policy."""
+        from .capability_classifier import CapabilityClassifierForecast, parse_capability_classifier_verdict
+
         capability: Final = self.config.capability_classifier_config
         classifier_system_prompt: Final = self._classifier_system_prompt
         if capability is None or classifier_system_prompt is None:
@@ -2761,7 +2766,7 @@ class ComplexityRouter(CustomLogger):
             messages_for_call, request_kwargs, encrypted_task=encrypted, max_output_tokens=v2.max_output_tokens
         )
         try:
-            verdict: Final = LLMV2Verdict.model_validate_json(extract_classifier_json(content))
+            verdict: Final = LLMV2Verdict.model_validate_json(_strip_json_code_fence(content))
         except ValidationError as error:
             _log_rejected_classifier_verdict(error, content, request_kwargs)
             return self._classifier_failure_outcome(
