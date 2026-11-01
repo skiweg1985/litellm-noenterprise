@@ -81,6 +81,28 @@ class SubscriptionDistributionTests(log_tests.SubscriptionLogTests):
         self.assertEqual(stored[0]['model_info']['subscription_assignment']['mode'], 'distribution')
         self.assertEqual(stored[0]['model_info']['subscription_assignment']['subscription_ids'], [third['subscription_id']])
 
+    @unittest.skipUnless(os.getenv('RESPONSE_CACHE_ENABLED') == 'true', 'requires isolated response cache')
+    def test_cached_distribution_does_not_report_selected_candidates_as_attempts(self):
+        first, _ = self.connect('CachedDistributionFirst')
+        second, _ = self.connect('CachedDistributionSecond')
+        name, created = self.create_distribution([first, second])
+        self.assertEqual(created.status_code, 200, created.text)
+        body = {'model': name, 'messages': [{'role': 'user', 'content': 'Cache one distributed result'}]}
+        for count in range(1, 5):
+            response = self.client.post('/v1/chat/completions', json=body)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.wait_logs(name, count)
+        rows = self.logs(name)['data']
+        self.assertEqual(len(rows), 4)
+        cached = [row for row in rows if row['cache_hit'] == 'True']
+        self.assertGreaterEqual(len(cached), 2, rows)
+        for row in cached:
+            self.assertFalse(row['metadata'].get('subscription_attempts'), row)
+            self.assertFalse(row['metadata'].get('subscription_ids'), row)
+        physical = [row for row in rows if row['cache_hit'] != 'True']
+        self.assertEqual(len(self.control()['requests']), len(physical))
+        self.assertTrue(all(len(row['metadata']['subscription_attempts']) == 1 for row in physical))
+
     def test_distribution_assignment_survives_restart(self):
         if os.getenv('SUBSCRIPTION_RESTART_PHASE') != 'read':
             first, _ = self.connect('PersistentDistributionFirst')
