@@ -15,6 +15,10 @@ export interface QuotaWindow {
 
 export interface SubscriptionAccount extends SubscriptionIdentity {
   account: string;
+  subscription_id: string;
+  display_name: string;
+  connection_revision: string | null;
+  retired: boolean;
   state: string;
   token_valid: boolean;
   token_expires_at: number | null;
@@ -49,7 +53,8 @@ export type SubscriptionAction =
   | "pending/confirm"
   | "pending/discard"
   | "refresh"
-  | "logout";
+  | "logout"
+  | "retire";
 
 const client = createApiClient({ getBaseUrl: () => getProxyBaseUrl() ?? "" });
 const endpoint = "/chatgpt/api/accounts";
@@ -62,5 +67,21 @@ export function updateSubscription(accessToken: string, name: string, action: Su
   return client.post<SubscriptionAccount>(`${endpoint}/${encodeURIComponent(name)}/${action}`, {
     accessToken,
     credentials: "same-origin",
+  });
+}
+
+export function createSubscription(accessToken: string, displayName: string) {
+  return client.post<SubscriptionAccount>(endpoint, {
+    accessToken,
+    credentials: "same-origin",
+    body: { display_name: displayName },
+  });
+}
+
+export function renameSubscription(accessToken: string, name: string, displayName: string) {
+  return client.patch<SubscriptionAccount>(`${endpoint}/${encodeURIComponent(name)}`, {
+    accessToken,
+    credentials: "same-origin",
+    body: { display_name: displayName },
   });
 }

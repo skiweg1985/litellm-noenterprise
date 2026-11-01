@@ -19,7 +19,7 @@ test("subscription management admits OIDC administrators and confirms account re
   expect(realStatus).toBe(200);
 
   const account = {
-    account: "example-seat", state: "ok", token_valid: true, email: "current@example.test",
+    account: "example-seat", subscription_id: "example-subscription-id", display_name: "example-seat", connection_revision: "example-revision", retired: false, state: "ok", token_valid: true, email: "current@example.test",
     token_expires_at: null, last_refresh_at: null, auto_login: false,
     credentials: ["example-credential"], models: ["example-model"], requests_24h: 3,
     known_account: { email: "current@example.test", account_id: "workspace-current" },
@@ -77,4 +77,46 @@ test("native administrators can open subscription management with their existing
   await expect(page.getByRole("heading", { name: "ChatGPT subscriptions", exact: true })).toBeVisible();
   await expect(page.getByText(/subscriptions signed in/)).toBeVisible();
   await expect(page.getByRole("textbox")).toHaveCount(0);
+});
+
+
+test("administrators create, rename, disconnect and retire subscriptions without server configuration", async ({ page, request }, testInfo) => {
+  test.skip(process.env.UI_ADMIN_DISABLED === "true", "The administration UI is deliberately disabled.");
+  await request.post("http://127.0.0.1:8080/control/actor", {
+    data: { sub: "subscription-manager", oid: "subscription-manager", roles: ["access", "admin"] },
+  });
+  await page.goto("/oidc/login");
+  await page.goto(path);
+  const name = `Browser subscription ${testInfo.project.name} ${Date.now()}`;
+  const renamed = `${name} renamed`;
+  await page.getByRole("button", {name: "Add subscription", exact: true}).click();
+  await page.getByRole("textbox", {name: "Subscription name", exact: true}).fill(name);
+  await page.getByRole("dialog").getByRole("button", {name: "Add subscription", exact: true}).click();
+  const account = page.getByRole("region", {name: `Subscription ${name}`, exact: true});
+  await expect(account).toBeVisible();
+  await expect(account).toContainText("Sign-in required");
+  await expect(account.getByRole("button", {name: "Start sign-in", exact: true})).toBeVisible();
+  // Reload proves creation persists at the installed API; no provider login is started.
+  await page.reload();
+  await expect(account).toBeVisible();
+  await account.getByRole("button", {name: "Rename", exact: true}).click();
+  await page.getByRole("textbox", {name: "Subscription name", exact: true}).fill(renamed);
+  await page.getByRole("button", {name: "Save name", exact: true}).click();
+  const updated = page.getByRole("region", {name: `Subscription ${renamed}`, exact: true});
+  await expect(updated).toBeVisible();
+  await updated.getByRole("button", {name: "Disconnect", exact: true}).click();
+  await expect(page.getByRole("dialog").getByRole("region", {name: "Affected models"})).toContainText("No models assigned.");
+  await page.getByRole("dialog").getByRole("button", {name: "Confirm", exact: true}).click();
+  await expect(updated).toContainText("Disconnected");
+  await expect(updated.getByRole("button", {name: "Start sign-in", exact: true})).toBeVisible();
+  await updated.getByRole("button", {name: "Retire subscription", exact: true}).click();
+  await expect(page.getByRole("dialog")).toContainText("Its history remains available.");
+  await page.getByRole("dialog").getByRole("button", {name: "Confirm", exact: true}).click();
+  await expect(updated).not.toBeVisible();
+  await page.getByText(/^Retired subscriptions \(/).click();
+  await expect(updated).toBeVisible();
+  await expect(updated).toContainText("Retired");
+  await expect(updated.getByRole("button")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({animations: "disabled", path: testInfo.outputPath("subscription-lifecycle.png")});
 });
