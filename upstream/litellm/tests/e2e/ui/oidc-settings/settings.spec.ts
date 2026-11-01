@@ -35,7 +35,7 @@ test("native SSO form activates complete OIDC policy and preserves it across con
   await page
     .getByLabel("Mapping 1 allowed values", { exact: true })
     .fill("operator");
-  await choose(page, "Mapping 1 role", "Internal user");
+  await choose(page, "Mapping 1 role", "Internal user", "keyboard");
   await page
     .getByRole("button", { name: "Add role mapping", exact: true })
     .click();
@@ -46,7 +46,8 @@ test("native SSO form activates complete OIDC policy and preserves it across con
   await choose(page, "Mapping 2 role", "Administrator — manage the proxy");
   await page
     .getByRole("button", { name: "Move mapping 2 up", exact: true })
-    .click();
+    .focus();
+  await page.keyboard.press("Enter");
   await choose(page, "Default role", "Customer");
   await page
     .getByLabel("Allow applications to use provider access tokens", {
@@ -89,17 +90,59 @@ test("native SSO form activates complete OIDC policy and preserves it across con
     .get(`${proxyHTTP}/.well-known/oauth-protected-resource`)
     .then((r) => r.json());
   expect(metadata.scopes_supported).toContain("api://litellm-api/access");
-  await page.screenshot({
-    path: testInfo.outputPath("oidc-settings-desktop.png"),
-    fullPage: true,
-  });
+  const validToken = await request
+    .post("http://127.0.0.1:8080/control/access-token", { data: {} })
+    .then((r) => r.json());
+  const providerHeaders = {
+    Authorization: `Bearer ${validToken.access_token}`,
+  };
+  expect(
+    (
+      await request.get(`${proxyHTTP}/v1/models`, { headers: providerHeaders })
+    ).status(),
+  ).toBe(200);
+  expect(
+    (
+      await request.get(`${proxyHTTP}/oidc/settings`, {
+        headers: providerHeaders,
+      })
+    ).status(),
+  ).toBe(403);
+  const wrongScope = await request
+    .post("http://127.0.0.1:8080/control/access-token", {
+      data: { scp: "other" },
+    })
+    .then((r) => r.json());
+  expect(
+    (
+      await request.get(`${proxyHTTP}/v1/models`, {
+        headers: { Authorization: `Bearer ${wrongScope.access_token}` },
+      })
+    ).status(),
+  ).toBe(403);
+
+  for (const [section, name] of [
+    ["OpenID Connect", "top"],
+    ["Roles after sign-in", "roles"],
+    ["Application and API access", "api"],
+  ]) {
+    await page
+      .getByRole("heading", { name: section, exact: true })
+      .scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: testInfo.outputPath(`oidc-settings-desktop-${name}.png`),
+      mask: [page.locator('input[type="password"]')],
+    });
+  }
 
   // Invalid edits remain editable; the active policy and credential are retained.
   await page
     .getByLabel("Session lifetime in seconds", { exact: true })
     .fill("45");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("Session lifetime");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Session lifetime" }),
+  ).toContainText("Session lifetime");
   await expect(
     page.getByLabel("Session lifetime in seconds", { exact: true }),
   ).toHaveValue("45");
@@ -133,7 +176,9 @@ test("native SSO form activates complete OIDC policy and preserves it across con
     await route.abort("connectionreset");
   });
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("could not be confirmed");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "could not be confirmed" }),
+  ).toContainText("could not be confirmed");
   await expect(
     page.getByLabel("Session lifetime in seconds", { exact: true }),
   ).toHaveValue("4000");
