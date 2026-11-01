@@ -43,7 +43,14 @@ export async function makeOpenAIImageGenerationRequest(
       } else if (response.data[0].b64_json) {
         // Convert base64 to data URL format
         const base64Data = response.data[0].b64_json;
-        updateUI(`data:image/png;base64,${base64Data}`, selectedModel);
+        const image = response.data[0] as typeof response.data[0] & {
+          provider_specific_fields?: { media_type?: string };
+        };
+        const reportedType = image.provider_specific_fields?.media_type;
+        const mediaType = reportedType && ["image/png", "image/jpeg", "image/webp"].includes(reportedType)
+          ? reportedType
+          : "image/png";
+        updateUI(`data:${mediaType};base64,${base64Data}`, selectedModel);
       } else {
         throw new Error("No image data found in response");
       }
