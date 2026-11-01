@@ -1963,7 +1963,8 @@ async def user_api_key_auth_builder(
             elif isinstance(response, UserAPIKeyAuth):
                 return response
         if master_key is None:
-            if general_settings.get("oidc_identity") is not None:
+            from litellm.proxy.auth.oidc_identity import settings as oidc_settings
+            if oidc_settings() is not None:
                 raise HTTPException(status_code=503, detail="OIDC requires a master key")
             if isinstance(api_key, str):
                 return UserAPIKeyAuth(
@@ -2846,6 +2847,10 @@ async def _inherit_org_identity(
 
 
 def is_no_auth_dev_mode(master_key: str | None, general_settings: Mapping[str, object]) -> bool:
+    from litellm.proxy.auth.oidc_settings import current_snapshot
+    snapshot = current_snapshot.get()
+    if snapshot is not None and snapshot.browser is not None:
+        return False
     return master_key is None and not any(
         general_settings.get(flag, False)
         for flag in ("enable_jwt_auth", "enable_oauth2_auth", "enable_oauth2_proxy_auth", "oidc_identity")
