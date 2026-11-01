@@ -17,6 +17,7 @@ test("an administrator creates and edits a distributed subscription model", asyn
   const accounts: { account: string; subscription_id: string; display_name: string; identity: string }[] = [];
   let modelId: string | undefined;
   let journeyFailed = false;
+  let releaseSubscriptions = () => {};
   try {
     for (const suffix of ["A", "B"]) {
       const label = `Distribution ${suffix} ${testInfo.project.name}`;
@@ -32,10 +33,19 @@ test("an administrator creates and edits a distributed subscription model", asyn
       await expect.poll(async () => (await api("/chatgpt/api/accounts")).data.accounts
         .find((row: { subscription_id: string }) => row.subscription_id === account.subscription_id)?.token_valid).toBe(true);
     }
+    // Exercise a user changing routing before the subscription catalog arrives.
+    const subscriptionsReady = new Promise<void>((resolve) => { releaseSubscriptions = resolve; });
+    await page.route("**/chatgpt/api/accounts", async (route) => {
+      await subscriptionsReady;
+      await route.continue();
+    });
     await page.goto(`/ui/models-and-endpoints/?tab=add&subscription=${accounts[0].subscription_id}&subscription_model=gpt-5.4`);
+    await expect(page.getByRole("table").getByRole("textbox")).toBeVisible();
     await page.getByRole("combobox", { name: "Subscription routing mode", exact: true }).click();
     await page.getByRole("option", { name: "Distribute requests", exact: true }).click();
     await expect(page.getByText(/equal preference/)).toBeVisible();
+    await expect(page.getByRole("table").getByRole("textbox")).toBeVisible();
+    releaseSubscriptions();
     const picker = page.getByRole("combobox", { name: "Add subscription", exact: true });
     await picker.fill(accounts[1].display_name);
     await page.getByRole("option", { name: accounts[1].display_name, exact: true }).click();
@@ -69,6 +79,7 @@ test("an administrator creates and edits a distributed subscription model", asyn
     journeyFailed = true;
     throw error;
   } finally {
+    releaseSubscriptions();
     try {
       if (modelId) expect((await api("/model/delete", "POST", { id: modelId })).status).toBe(200);
       for (const account of accounts) expect((await api(`/chatgpt/api/accounts/${account.account}/retire`, "POST")).status).toBe(200);
