@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
 
+// Chromium omits zero seconds when serializing datetime-local; fill requires that canonical form.
+const dateInputValue = (iso: string) => iso.slice(0, 19).replace(/:00$/, "");
+
 test("retired subscription usage keeps exact UTC log links and empty periods honest", async ({ page, request }, testInfo) => {
   test.skip(process.env.UI_ADMIN_DISABLED === "true", "Subscription administration is disabled.");
   const id = crypto.randomUUID();
@@ -38,13 +41,13 @@ test("retired subscription usage keeps exact UTC log links and empty periods hon
     await expect(card.getByText("2 recorded", { exact: true })).toHaveCount(2);
     await expect(card.getByText(`Names in retained logs: ${label}`, { exact: true })).toBeVisible();
     await expect(page.getByRole("region", { name: "History coverage" })).toContainText("Complete historical coverage is unknown");
-    await page.getByLabel("From (UTC)", { exact: true }).fill("2040-02-01T00:00:00");
-    await page.getByLabel("Through (UTC, inclusive)", { exact: true }).fill("2040-02-02T00:00:00");
+    await page.getByLabel("From (UTC)", { exact: true }).fill(dateInputValue("2040-02-01T00:00:00Z"));
+    await page.getByLabel("Through (UTC, inclusive)", { exact: true }).fill(dateInputValue("2040-02-02T00:00:00Z"));
     await page.getByRole("button", { name: "Apply period", exact: true }).click();
     await expect(card.getByText("Unknown", { exact: true })).toHaveCount(2);
     await expect(card.getByText("2 recorded", { exact: true })).toHaveCount(0);
-    await page.getByLabel("From (UTC)", { exact: true }).fill(start.slice(0, 19));
-    await page.getByLabel("Through (UTC, inclusive)", { exact: true }).fill(end.slice(0, 19));
+    await page.getByLabel("From (UTC)", { exact: true }).fill(dateInputValue(start));
+    await page.getByLabel("Through (UTC, inclusive)", { exact: true }).fill(dateInputValue(end));
     await page.getByRole("button", { name: "Apply period", exact: true }).click();
     await expect(card.getByText("2 recorded", { exact: true })).toHaveCount(2);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
