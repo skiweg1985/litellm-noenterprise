@@ -218,6 +218,37 @@ IANA timezone. Monitoring responses omit device authorization codes.
 No monitoring endpoint, organization certificate, deployment address or account
 credential is configured in the distributed image.
 
+## Generate images with OpenRouter
+
+Add an OpenRouter model with **image_generation** mode and its upstream model ID,
+then select it in the Playground's image-generation view. Existing named
+credentials work unchanged. Dedicated image models use OpenRouter's `/api/v1/images`
+API with a text prompt; no custom API base is needed.
+
+Known chat/image models retain their existing chat-completions route, including
+OpenRouter `:variant` suffixes. Registered OpenRouter model metadata declaring both
+text and image output also retains that route. Other image models use the native
+Image API without a discovery request. To select a route explicitly, set the
+model's API base to the complete URL ending in `/images` or `/chat/completions`.
+An explicit endpoint takes precedence over automatic model selection.
+
+Native requests preserve `size`, `quality`, and `n`: pixel sizes are not approximated
+and quality is not converted into resolution. `size=auto` leaves dimensions to the
+provider. Native `resolution`, `aspect_ratio`, and provider routing settings can
+be supplied through `extra_body`. Unsupported adapter parameters and malformed
+values fail before dispatch. Valid combinations remain model/provider-dependent;
+check [OpenRouter's capability documentation](https://openrouter.ai/docs/guides/overview/multimodal/image-generation)
+and the model's image endpoint metadata. Providers can reject unsupported sizes
+or image counts; quality has an effect only on providers with a quality control.
+
+The buffered response contains base64 images (`response_format=b64_json`, also the
+default). Hosted-URL responses, editing/reference images, and streaming previews
+are outside this adapter's scope. Image media types are preserved in
+`data[].provider_specific_fields.media_type`; the Playground displays PNG, JPEG,
+and WebP and retains the PNG fallback for providers without media metadata.
+Provider-reported cost is retained. Token usage is reported only when the provider
+supplies the counts; per-image cost is not converted into invented token usage.
+
 ## Provider behavior
 
 - ChatGPT accepts the standard client request shape and handles an upstream SSE
@@ -241,8 +272,13 @@ credential is configured in the distributed image.
 
 ```sh
 python3 scripts/test_extensions.py litellm-noenterprise:1.106.6
+python3 scripts/test_openrouter_images.py litellm-noenterprise:1.106.6
 python3 scripts/test_identity.py litellm-noenterprise:1.106.6
 ```
+
+The OpenRouter browser check requires the pinned Playwright dependencies in
+`tests/e2e` and exercises the public proxy API, named credential resolution, and
+PNG/JPEG rendering with a controlled provider fixture.
 
 Extension checks run installed code with synthetic accounts and local mock
 services. They require no real subscription, deployment credentials or external
