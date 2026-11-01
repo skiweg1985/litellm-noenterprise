@@ -597,8 +597,10 @@ def get_logging_payload(
     ):  # use 'tags' from standard logging payload instead
         request_tags = safe_dumps(standard_logging_payload["request_tags"])
 
-    _model_id: Final = metadata.get("model_info", {}).get("id", "") or _sl_attribution_fallback(
-        standard_logging_payload, "model_id"
+    _model_id: Final = (
+        _sl_attribution_fallback(standard_logging_payload, "model_id")
+        if (metadata.get("model_info") or {}).get("subscription_assignment")
+        else metadata.get("model_info", {}).get("id", "") or _sl_attribution_fallback(standard_logging_payload, "model_id")
     )
     _model_group: Final = metadata.get("model_group", "") or _sl_attribution_fallback(
         standard_logging_payload, "model_group"
