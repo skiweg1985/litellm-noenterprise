@@ -19,6 +19,7 @@ from litellm._logging import verbose_logger
 from litellm.proxy._experimental.mcp_server.oauth_identity_binding import credential_binding_matches
 from litellm.proxy._experimental.mcp_server.outbound_credentials.authz_code_refresher import (
     AuthorizationCodeRefresher,
+    OAuthRefreshRejected,
 )
 from litellm.proxy._experimental.mcp_server.outbound_credentials.dual_cache_token_backend import (
     AsyncCache,
@@ -73,6 +74,7 @@ async def _persist_credential(
     scopes: tuple[str, ...] | None,
     identity_binding_proof: str | None = None,
     cimd_client_id: str | None = None,
+    expected_refresh_token: str | None = None,
 ) -> None:
     from litellm.proxy._experimental.mcp_server.db import (  # noqa: PLC0415
         store_user_oauth_credential,
@@ -91,6 +93,7 @@ async def _persist_credential(
         scopes=list(scopes) if scopes else None,
         skip_byok_guard=True,
         identity_binding_proof=identity_binding_proof,
+        expected_refresh_token=expected_refresh_token,
         **({"cimd_client_id": cimd_client_id} if cimd_client_id is not None else {}),
     )
 
@@ -109,10 +112,27 @@ async def _post_token_endpoint(url: str, form: dict[str, str], headers: dict[str
     try:
         client: Final = get_async_httpx_client(llm_provider=provider)  # pyright: ignore
         response: Final = await client.post(url, headers=request_headers, data=form)  # pyright: ignore
+        if response.status_code in (400, 401):
+            try:
+                rejected = response.json().get("error") in ("invalid_grant", "invalid_token")
+            except (ValueError, AttributeError):
+                rejected = False
+            if rejected:
+                raise OAuthRefreshRejected()
         response.raise_for_status()  # pyright: ignore
         body: Final[dict[str, object]] = response.json()  # pyright: ignore
+    except OAuthRefreshRejected:
+        raise
     except Exception as exc:  # noqa: BLE001
-        verbose_logger.warning("MCP OAuth refresh request failed: %s", exc)
+        failed_response = getattr(exc, "response", None)
+        if failed_response is not None and failed_response.status_code in (400, 401):
+            try:
+                rejected = failed_response.json().get("error") in ("invalid_grant", "invalid_token")
+            except (ValueError, AttributeError):
+                rejected = False
+            if rejected:
+                raise OAuthRefreshRejected() from None
+        verbose_logger.warning("MCP OAuth refresh request failed: %s", type(exc).__name__)
         return None
     else:
         return body  # pyright: ignore
@@ -152,6 +172,8 @@ async def _read_bound_credential(
     server_lookup: ServerLookup, user_id: str, server_id: str
 ) -> Mapping[str, object] | None:
     credential: Final = await _read_credential(user_id, server_id)
+    if credential and credential.get("reconnect_required"):
+        return None
     server: Final = server_lookup(server_id)
     binding: Final = server.oauth_identity_binding if server else None
     if credential is not None and binding is not None and binding.mode == "enforce":
@@ -164,7 +186,16 @@ def _build_per_user_oauth_token_store(
     server_lookup: ServerLookup,
 ) -> tuple[CachedOAuthTokenStore, bool]:
     backend, coordinator, uses_redis = _runtime_backend_and_coordinator()
-    refresher: Final = AuthorizationCodeRefresher(server_lookup, _post_token_endpoint, _persist_credential)
+    async def mark_reconnect(user_id: str, server_id: str, refresh_token: str) -> None:
+        from litellm.proxy._experimental.mcp_server.db import mark_user_oauth_reconnect
+        from litellm.proxy.proxy_server import prisma_client
+
+        if prisma_client is not None:
+            await mark_user_oauth_reconnect(prisma_client, user_id, server_id, refresh_token)
+
+    refresher: Final = AuthorizationCodeRefresher(
+        server_lookup, _post_token_endpoint, _persist_credential, mark_reconnect=mark_reconnect
+    )
     refreshing: Final = RefreshingTokenStore(
         V2PerUserTokenStore(partial(_read_bound_credential, server_lookup)), refresher, coordinator=coordinator
     )
@@ -203,6 +234,11 @@ class LazyPerUserOAuthTokenStore:
 
     async def fetch(self, user_id: str, server_id: str) -> OAuthToken | None:
         token: Final = await self._fetch_token(user_id, server_id)
+        if token is not None:
+            current = await _read_credential(user_id, server_id)
+            if not current or current.get("reconnect_required") or current.get("access_token") != token.access_token:
+                await self.invalidate(user_id, server_id)
+                return None
         server: Final = self._server_lookup(server_id)
         binding: Final = server.oauth_identity_binding if server else None
         if token is not None and binding is not None and binding.mode == "enforce":

@@ -31,13 +31,25 @@ containers = []
 
 
 def docker(*parts, check=True):
-    return subprocess.run(["docker", *parts], check=check, text=True, capture_output=True)
+    return subprocess.run(
+        ["docker", *parts], check=check, text=True, capture_output=True
+    )
 
 
 def run(name, *parts):
     full = prefix + "-" + name
     containers.append(full)
-    return docker("run", "-d", "--name", full, "--network", prefix, "--network-alias", name, *parts)
+    return docker(
+        "run",
+        "-d",
+        "--name",
+        full,
+        "--network",
+        prefix,
+        "--network-alias",
+        name,
+        *parts,
+    )
 
 
 with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
@@ -64,6 +76,32 @@ mcp_servers:
     authorization_url: http://issuer:8080/authorize
     token_url: http://issuer:8080/token
     client_id: litellm-test
+  managed_a:
+    server_id: managed_a
+    url: http://mcp-upstream:8090/mcp
+    transport: http
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    authorization_url: http://mcp-upstream:8090/oauth/authorize
+    token_url: http://mcp-upstream:8090/oauth/token
+    client_id: mcp-test
+  managed_b:
+    server_id: managed_b
+    url: http://mcp-upstream:8090/mcp
+    transport: http
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    authorization_url: http://mcp-upstream:8090/oauth/authorize
+    token_url: http://mcp-upstream:8090/oauth/token
+    client_id: mcp-test
+  managed_unconfigured:
+    server_id: managed_unconfigured
+    url: http://mcp-upstream:8090/mcp
+    transport: http
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    authorization_url: http://mcp-upstream:8090/oauth/authorize
+    token_url: http://mcp-upstream:8090/oauth/token
 general_settings:
   master_key: sk-identity-test-only
   oidc_api:
@@ -82,6 +120,10 @@ general_settings:
     redirect_uri: http://proxy:4000/oidc/callback
     allow_insecure_http: true
     subject_claim: oid
+    mcp_access_rules:
+      managed_a: {claim: roles, any_of: [mcp-a]}
+      managed_b: {claim: roles, any_of: [mcp-b]}
+      managed_unconfigured: {claim: roles, any_of: [mcp-setup]}
     access_rule:
       claim: roles
       any_of: [access]
@@ -93,16 +135,25 @@ general_settings:
     default_role: internal_user_viewer
 """)
     value = config.read_text().replace("api://litellm-api/access", args.api_scope_name)
-    value = value.replace("token_value: access", "token_value: " + json.dumps(args.api_token_scope))
-    value = value.replace("audience: litellm-api", "audience: " + json.dumps(args.api_audience))
-    value = value.replace("token_types: [JWT]", "token_types: " + json.dumps([args.api_token_type]))
+    value = value.replace(
+        "token_value: access", "token_value: " + json.dumps(args.api_token_scope)
+    )
+    value = value.replace(
+        "audience: litellm-api", "audience: " + json.dumps(args.api_audience)
+    )
+    value = value.replace(
+        "token_types: [JWT]", "token_types: " + json.dumps([args.api_token_type])
+    )
     if not args.reject_missing_master:
         value = value.replace(
-            "master_key: sk-identity-test-only", "master_key: " + json.dumps(args.master_key)
+            "master_key: sk-identity-test-only",
+            "master_key: " + json.dumps(args.master_key),
         )
     config.write_text(value)
     if args.reject_missing_master:
-        config.write_text(config.read_text().replace("  master_key: sk-identity-test-only\n", ""))
+        config.write_text(
+            config.read_text().replace("  master_key: sk-identity-test-only\n", "")
+        )
     database = "postgresql://fixture:fixture-only@db:5432/litellm"
     try:
         docker("network", "create", prefix)
@@ -117,7 +168,12 @@ general_settings:
             "postgres:17-alpine",
         )
         for _ in range(60):
-            if docker("exec", prefix + "-db", "pg_isready", "-U", "fixture", check=False).returncode == 0:
+            if (
+                docker(
+                    "exec", prefix + "-db", "pg_isready", "-U", "fixture", check=False
+                ).returncode
+                == 0
+            ):
                 break
             time.sleep(1)
         else:
@@ -146,8 +202,17 @@ general_settings:
             args.image,
             "/work/tests/identity/fixtures/mcp_server.py",
         )
-        run("issuer", *mount, "--entrypoint", "python", args.image, "/work/tests/identity/fixtures/issuer.py")
-        source_env = ["-e", "PYTHONPATH=/work/upstream/litellm"] if args.source_overlay else []
+        run(
+            "issuer",
+            *mount,
+            "--entrypoint",
+            "python",
+            args.image,
+            "/work/tests/identity/fixtures/issuer.py",
+        )
+        source_env = (
+            ["-e", "PYTHONPATH=/work/upstream/litellm"] if args.source_overlay else []
+        )
         run(
             "proxy",
             *mount,
@@ -198,7 +263,9 @@ general_settings:
                 print("PASS: " + expected + " (startup rejected)")
                 raise SystemExit(0)
             if (
-                docker("inspect", prefix + "-proxy", "--format", "{{.State.Status}}").stdout.strip()
+                docker(
+                    "inspect", prefix + "-proxy", "--format", "{{.State.Status}}"
+                ).stdout.strip()
                 == "exited"
             ):
                 raise RuntimeError("proxy exited during startup")
@@ -238,6 +305,55 @@ general_settings:
         print(result.stderr)
         if result.returncode:
             raise RuntimeError("identity acceptance tests failed")
+        if args.test_pattern in ("test*.py", "test_mcp.py"):
+            docker("restart", prefix + "-proxy")
+            for _ in range(90):
+                ready = docker(
+                    "exec",
+                    prefix + "-proxy",
+                    "python",
+                    "-c",
+                    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')",
+                    check=False,
+                )
+                if ready.returncode == 0:
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError("proxy did not restart")
+            persistence = docker(
+                "run",
+                "--rm",
+                "--network",
+                prefix,
+                *mount,
+                "-e",
+                "MCP_RESTART_PHASE=read",
+                "--workdir",
+                "/work/tests/identity",
+                "--entrypoint",
+                "python",
+                args.image,
+                "-m",
+                "unittest",
+                "-v",
+                "test_mcp.PersonalMCPTests.test_connection_survives_cold_restart",
+                check=False,
+            )
+            print(persistence.stdout)
+            print(persistence.stderr)
+            if persistence.returncode:
+                raise RuntimeError("managed MCP cold-restart persistence failed")
+        logs = docker("logs", prefix + "-proxy", check=False)
+        if any(
+            marker in logs.stdout + logs.stderr
+            for marker in (
+                "mcp-fixture-access-",
+                "mcp-fixture-refresh-",
+                "client-supplied-sentinel",
+            )
+        ):
+            raise AssertionError("MCP credential material appeared in proxy logs")
     except Exception:
         for name in containers:
             if name.endswith(("-proxy", "-issuer")):

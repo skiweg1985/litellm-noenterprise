@@ -10,7 +10,7 @@ violation: the request is httpx2's object, and these carry no state of their own
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
 
 import httpx2
 from pydantic import SecretStr
@@ -39,3 +39,22 @@ class StaticHeaderAuth(httpx2.Auth):
     def auth_flow(self, request: httpx2.Request) -> Generator[httpx2.Request, httpx2.Response, None]:
         request.headers[self.header_name] = self._header_value.get_secret_value()
         yield request
+
+
+class PersonalOAuthAuth(httpx2.Auth):
+    """Record upstream rejection of the exact personal bearer used for this request."""
+
+    def __init__(self, inner: StaticHeaderAuth, rejected: Callable[[str], Awaitable[None]]) -> None:
+        self._inner = inner
+        self._rejected = rejected
+        self.header_name = inner.header_name
+
+    async def async_auth_flow(self, request: httpx2.Request) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
+        flow = self._inner.async_auth_flow(request)
+        try:
+            outbound = await anext(flow)
+            response = yield outbound
+            if response.status_code == 401:
+                await self._rejected(outbound.headers[self.header_name])
+        finally:
+            await flow.aclose()

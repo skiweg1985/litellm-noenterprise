@@ -112,6 +112,18 @@ async def authorize_mcp_server(
             detail=dict(forbidden_detail),
         )
 
+    from litellm.proxy._experimental.mcp_server.oidc_policy import require_server_access
+
+    if resolved.runtime is not None:
+        require_server_access(user_api_key_dict, resolved.runtime)
+    else:
+        runtime = manager.get_mcp_server_by_id(resolved.table.server_id)
+        if runtime is not None:
+            require_server_access(user_api_key_dict, runtime)
+    if user_api_key_dict.oidc_identity_source:
+        allowed = await manager.get_allowed_mcp_servers(user_api_key_dict)
+        if resolved.table.server_id not in allowed:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=dict(forbidden_detail))
     if is_admin_view:
         return resolved
 

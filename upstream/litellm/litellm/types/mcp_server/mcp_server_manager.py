@@ -39,6 +39,7 @@ class MCPOAuthMetadata(LiteLLMBaseModel):
     authorization_url: str | None = None
     token_url: str | None = None
     registration_url: str | None = None
+    revocation_url: str | None = None
     client_id_metadata_document_supported: bool | None = None
     authorization_response_iss_parameter_supported: bool = False
     discovered_issuer: str | None = None

@@ -202,10 +202,16 @@ async def authenticate_provider(request: Request, api_key: str | None) -> UserAP
             user_id=user_id,
             user_role=role,
             user_email=user.user_email,
+            org_id=user.organization_id,
             api_key="oidc-access:" + hashlib.sha256(api_key.encode()).hexdigest(),
             models=list(user.models or []),
         )
+        auth.requires_fresh_policy = True
         auth.oidc_identity_source = "provider"
+        auth.oidc_verified_claims = request.state.oidc_claims
+        from litellm.proxy._experimental.mcp_server.oidc_policy import attach_user_permissions
+
+        await attach_user_permissions(auth, user)
         return auth
     except HTTPException as exc:
         if exc.status_code == 401:
@@ -233,7 +239,7 @@ def require_personal_identity(request: Request) -> None:
 
 def require_personal_mcp_subject(auth: UserAPIKeyAuth | None) -> None:
     """Native keys cannot select a user's persisted upstream credential."""
-    if settings() is not None and (auth is None or auth.oidc_identity_source not in ("browser", "provider")):
+    if settings() is not None and (auth is None or auth.oidc_identity_source != "provider"):
         raise HTTPException(
-            403, "Personal MCP credentials require a provider user token or OIDC browser session"
+            403, "Personal MCP tool use requires a provider user access token"
         )

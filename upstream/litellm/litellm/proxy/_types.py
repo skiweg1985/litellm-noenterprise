@@ -1863,6 +1863,12 @@ class MCPOAuthUserCredentialRequest(LiteLLMPydanticObjectBase):
 class MCPOAuthUserCredentialStatus(LiteLLMPydanticObjectBase):
     """Describes whether the calling user has a stored OAuth credential."""
 
+    upstream_revocation: Literal["revoked", "unsupported", "failed", "no_credential"] | None = None
+    connection_mode: Literal["managed", "client_supplied"] | None = None
+    connection_status: Literal["connected", "disconnected", "reconnect_required", "unavailable"] | None = None
+    configuration_error: Literal["oauth_client_required"] | None = None
+    can_refresh: bool = False
+
     server_id: str
     has_credential: bool
     expires_at: str | None = None  # ISO-8601
@@ -3505,6 +3511,7 @@ class UserAPIKeyAuth(LiteLLM_VerificationTokenView):  # the expected response ob
     # metadata or JWT claims, so it cannot be forged to gain the team-inherited MCP grant union
     # or to escape the caller-Authorization egress scrub. exclude=True keeps it out of serialization.
     oidc_identity_source: Literal["browser", "provider"] | None = Field(default=None, exclude=True)
+    oidc_verified_claims: dict[str, Any] = Field(default_factory=dict, exclude=True)
     mcp_admitted_user_subject: bool = Field(default=False, exclude=True)
     requires_fresh_policy: bool = Field(default=False, exclude=True)
     mcp_explicit_grants_only: bool = Field(default=False, exclude=True)
@@ -3577,6 +3584,7 @@ class UserAPIKeyAuth(LiteLLM_VerificationTokenView):  # the expected response ob
         # path via post-construction assignment. Strip it from any validated input (constructor
         # kwargs, model_validate, a JWT/key claim splat) so it can never be forged from caller data.
         values.pop("oidc_identity_source", None)
+        values.pop("oidc_verified_claims", None)
         values.pop("mcp_admitted_user_subject", None)
         values.pop("requires_fresh_policy", None)
         values.pop("mcp_explicit_grants_only", None)

@@ -109,13 +109,29 @@ async def resolve_upstream_auth(
     (authorization_code's browser-OAuth 401, token_exchange's RFC 9728 challenge) or maps any
     other ``CredError`` onto its public HTTP status; it never returns an error as a value.
     """
-    if isinstance(spec.config, AuthorizationCodeConfig):
+    from litellm.proxy._experimental.mcp_server.oidc_policy import require_server_access
+
+    require_server_access(user_api_key_auth, server)
+    if isinstance(spec.config, AuthorizationCodeConfig) or server.is_oauth_delegate:
         from litellm.proxy.auth.oidc_api import require_personal_mcp_subject
 
         require_personal_mcp_subject(user_api_key_auth)
     match await resolve_credentials_with_source(provider, to_subject(user_api_key_auth, subject_token), spec):
         case Ok(credential):
-            auth: Final = credential.auth
+            auth = credential.auth
+            if isinstance(spec.config, AuthorizationCodeConfig) and user_api_key_auth is not None:
+                from litellm.proxy._experimental.mcp_server.db import mark_user_oauth_reconnect
+                from litellm.proxy._experimental.mcp_server.outbound_credentials.httpx_auth import PersonalOAuthAuth
+                from litellm.proxy.proxy_server import prisma_client
+
+                async def rejected(header: str) -> None:
+                    if prisma_client is not None and user_api_key_auth.user_id:
+                        await mark_user_oauth_reconnect(
+                            prisma_client, user_api_key_auth.user_id, server.server_id,
+                            access_token=header.removeprefix("Bearer "),
+                        )
+
+                auth = PersonalOAuthAuth(auth, rejected)
             # NoOpAuth has no header_name and so never conflicts.
             header_name: Final[str | None] = getattr(auth, "header_name", None)
             if header_name is None or not extra_headers:

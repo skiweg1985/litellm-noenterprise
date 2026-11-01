@@ -2,8 +2,7 @@
 
 The independent OIDC integration uses the existing LiteLLM user database and
 personal connection page. It supports independent browser and provider-token API
-grants without enabling premium features. Per-server MCP access rules remain a
-separate follow-up.
+grants and personal MCP connections without enabling premium features.
 
 ## Configure a provider
 
@@ -204,6 +203,90 @@ sessions have their separate lifetime described above. Choose bounded token
 and session lifetimes for the deployment. Real Entra/other-provider client
 compatibility still requires testing the chosen tenant and registrations.
 
+## Configure personal MCP connections
+
+Choose the existing connection model on each centrally configured server. For
+example, add these server definitions and extend `oidc_identity`:
+
+```yaml
+mcp_servers:
+  reports:
+    server_id: reports
+    url: https://reports.example.org/mcp
+    transport: http
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    issuer: https://reports-id.example.org
+    client_id: litellm-reports
+  catalog:
+    server_id: catalog
+    url: https://catalog.example.org/mcp
+    transport: http
+    auth_type: oauth_delegate
+
+general_settings:
+  oidc_identity:
+    # Keep the provider settings shown above.
+    mcp_access_rules:
+      reports: {claim: roles, any_of: [reports-user]}
+      catalog: {claim: groups, any_of: [catalog-users]}
+```
+
+Keys in `mcp_access_rules` identify a server ID, alias, or configured name, in
+that precedence order. Pin `server_id` for stable configuration across updates.
+A matching rule grants personal availability without requiring a native API key.
+A nonmatching rule denies visibility, connection and tool access, including for
+an administrator using their own connection. Existing explicit user, team,
+organization, tool and network restrictions still apply. Servers without a rule
+retain their existing LiteLLM permissions. Rule claims are retained automatically;
+API requests use their current verified token claims, never the browser's saved
+role. Configuration changes require restarting the proxy.
+
+For managed OAuth, configure a registered upstream client ID and any required
+client secret using LiteLLM's existing server configuration. Managed per-user
+dynamic client registration is not supported; this limitation concerns the MCP
+client, not the OIDC login provider. A missing client ID produces the status
+`unavailable` with `configuration_error: oauth_client_required`. Client-supplied
+and other existing DCR modes retain their upstream behavior. Register the proxy's `/callback` URL with the
+upstream authorization server. The authenticated personal flow uses the existing
+`/v1/mcp/server/oauth/{server_id}/authorize` and `/token` endpoints with S256 PKCE;
+the browser returns through `/ui/mcp/oauth/callback`. The code binds the verified
+user, server, client redirect URI and verifier. Alias/root token routes cannot
+redeem this managed flow anonymously. The managed exchange stores credentials
+server-side and returns connection status without access or refresh tokens.
+The existing UI integration is being adapted to this response in issue #7.
+
+Connections use the existing encrypted per-user, per-server database records.
+Keep `LITELLM_SALT_KEY` stable and protected together with database backups, as
+required by the existing credential encryption. Logout and proxy restart retain
+managed connections. Browser sessions may connect, inspect and disconnect;
+executing personal MCP tools requires the user's provider access token. Native
+LiteLLM keys cannot select these personal credentials. Neither model falls back
+to another user's connection.
+
+The credential status endpoint reports `connection_mode`, `connection_status`,
+`can_refresh`, and expiry without exposing tokens. Expired grants with a usable
+refresh token remain refreshable. A temporary refresh-service failure denies the
+current call but permits a later retry. An invalid grant or upstream authentication rejection
+requires reconnecting; successful authorization replaces that user's old grant.
+Concurrent refresh cannot recreate a disconnected record. Revocation at the
+upstream is detected on use, not pushed to LiteLLM.
+
+`DELETE /v1/mcp/server/{server_id}/oauth-user-credential` removes the local
+credential and invalidates its caches first. It then attempts the issuer's
+advertised revocation endpoint and reports `upstream_revocation` as `revoked`,
+`unsupported`, `failed`, or `no_credential`. `revoked` means the upstream
+endpoint accepted the revocation request; it is not independent verification
+that every upstream session has ended. A remote failure does not restore the
+local connection. An already running upstream operation is not cancelled.
+Users may remove their own retained connection after losing server permission;
+this does not restore visibility or execution access.
+
+OAuth Delegate uses the separate upstream header described above. It never saves
+a managed connection, and the managed credential-write endpoint rejects this
+mode. Clients obtain and refresh their upstream credentials themselves. This
+release does not require Entra OBO or turn the gateway into an identity provider.
+
 ## Verify an image
 
 ```sh
@@ -220,11 +303,14 @@ protocol failures, metadata tampering/replay, provider-token admission, scope
 discovery, independent browser/API grants, native-key compatibility, MCP token
 separation, and cross-user MCP session isolation. It uses installed image code
 by default; `--source-overlay` is an explicit development option. No live provider credentials are needed. These
-checks do not establish live provider compatibility or the final MCP connection
-workflow, which has its own acceptance work.
+checks also cover managed OAuth binding, both credential models, claim-based
+server permissions, refresh/reconnect, logout retention, disconnect races, and
+cold-restart persistence. They do not establish live provider compatibility.
 
-Validation on 2026-11-01 passed all 25 HTTP/MCP journeys against the installed
-ARM64 image, without a source overlay, plus an alternate scope/type profile and
-startup rejection for missing master keys and unsafe generic-JWT audiences.
-The source audit and nine baseline tests passed; the image audit found no
-excluded enterprise package paths in any of its 13 final layers.
+Validation on 2026-11-01 passed 41 public HTTP/MCP journeys against the installed
+ARM64 image, followed by a proxy restart and stored-connection verification.
+The suite includes two identities, direct and virtual tool authorization,
+managed OAuth binding, transient and permanent refresh failures, disconnect
+during refresh, upstream rejection, and token-free connection responses.
+Proxy logs contained none of the fixture credential sentinels. Source and image
+audits and the baseline startup/completion checks also passed.
