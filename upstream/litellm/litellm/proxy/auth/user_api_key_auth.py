@@ -2849,7 +2849,7 @@ async def _inherit_org_identity(
 def is_no_auth_dev_mode(master_key: str | None, general_settings: Mapping[str, object]) -> bool:
     from litellm.proxy.auth.oidc_settings import current_snapshot
     snapshot = current_snapshot.get()
-    if snapshot is not None and snapshot.browser is not None:
+    if snapshot is not None and (snapshot.browser is not None or snapshot.error is not None):
         return False
     return master_key is None and not any(
         general_settings.get(flag, False)

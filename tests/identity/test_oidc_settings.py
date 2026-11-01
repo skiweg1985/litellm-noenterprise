@@ -48,3 +48,29 @@ class OIDCSettingsTests(unittest.TestCase):
         self.assertTrue(ui.json()["sso_configured"], ui.text)
         metadata = httpx.get(BASE + "/.well-known/oauth-protected-resource", trust_env=False).json()
         self.assertEqual(metadata["scopes_supported"], ["api://fixture/access"])
+
+    def enabled(self):
+        admin = {"Authorization": "Bearer " + MASTER}
+        current = httpx.get(BASE + "/oidc/settings", headers=admin, trust_env=False).json()
+        browser = {"issuer": "http://issuer:8080", "client_id": "litellm-test", "redirect_uri": BASE + "/oidc/callback", "allow_insecure_http": True, "subject_claim": "oid", "access_rule": {"claim": "roles", "any_of": ["access"]}, "role_mappings": [{"rule": {"claim": "roles", "any_of": ["admin"]}, "role": "proxy_admin"}], "mcp_access_rules": {"managed_a": {"claim": "roles", "any_of": ["mcp-a"]}}}
+        api = {"resource": BASE, "audience": "litellm-api", "scope_claim": "scp", "token_types": ["JWT"], "scopes": [{"name": "api://fixture/access", "token_value": "access"}]}
+        response = httpx.put(BASE + "/oidc/settings", headers=admin, json={"expected_revision": current["revision"], "browser": browser, "api": api, "client_secret": "fixture-only"}, trust_env=False)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_native_key_cannot_execute_personal_mcp_tools(self):
+        self.enabled()
+        from test_mcp import PersonalMCPTests
+        flow = PersonalMCPTests()
+        flow.client = httpx.Client(base_url=BASE, trust_env=False)
+        self.addCleanup(flow.client.close)
+        provider = flow.headers(user="settings-mcp", roles=["access", "mcp-a"])
+        code, verifier = flow.connect(provider, actor="settings-mcp-upstream")
+        connected = flow.exchange(provider, code, verifier)
+        self.assertEqual(connected.status_code, 200, connected.text)
+        called = flow.client.post("/mcp-rest/tools/call", headers=provider, json={"server_id": "managed_a", "name": "whoami", "arguments": {}})
+        self.assertEqual(called.status_code, 200, called.text)
+        denied = httpx.post(BASE + "/mcp-rest/tools/call", headers={"Authorization": "Bearer " + MASTER}, json={"server_id": "managed_a", "name": "whoami", "arguments": {}}, trust_env=False)
+        self.assertEqual(denied.status_code, 403, denied.text)
+        self.assertIn("provider user access token", denied.text)
+
