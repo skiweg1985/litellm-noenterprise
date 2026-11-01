@@ -4,6 +4,20 @@ test("saved settings fit a phone and keep credentials write-only", async ({
   page,
 }, testInfo) => {
   await openSettings(page);
+  const title = await page
+    .getByRole("heading", { name: "OpenID Connect", exact: true })
+    .boundingBox();
+  const lastTabEdge = await page
+    .getByRole("tablist")
+    .getByRole("tab")
+    .evaluateAll((tabs) =>
+      Math.max(...tabs.map((tab) => tab.getBoundingClientRect().bottom)),
+    );
+  expect(
+    title!.y,
+    "Wrapped navigation tabs must not overlap the settings heading",
+  ).toBeGreaterThanOrEqual(lastTabEdge);
+
   await expect(
     page.getByText("OpenID Connect is active.", { exact: true }),
   ).toBeVisible();
