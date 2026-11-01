@@ -142,11 +142,17 @@ export interface components {
             outcome: "success" | "failure" | "cancelled" | "incomplete";
             /** Output Tokens */
             output_tokens: number | null;
+            /** Parent Model Id */
+            parent_model_id?: string | null;
             /**
              * Reason
              * @enum {string}
              */
             reason: "initial" | "retry" | "fallback";
+            /** Reserve Switch */
+            reserve_switch?: boolean;
+            /** Routing Mode */
+            routing_mode?: ("fixed" | "priority" | "distribution") | null;
             /** Sequence */
             sequence: number;
             /** Started At */

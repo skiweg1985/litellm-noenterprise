@@ -163,3 +163,20 @@ describe("subscription model submission", () => {
     expect(result?.[0].litellmParamsObj).not.toHaveProperty("subscription_id");
   });
 });
+
+it("submits ordered reserves as one assignment without leaking UI fields into provider parameters", async () => {
+  const deployments = await prepareModelAddRequest({
+    model_mappings: [{ public_name: "Team model", litellm_model: "chatgpt/example" }],
+    subscription_id: "old-legacy",
+    subscription_selection: { mode: "priority", subscription_ids: ["preferred", "reserve"] },
+    timeout: 20,
+    api_key: "stale-key",
+    model_info_params: JSON.stringify({ owner: "team", subscription_assignment: { mode: "fixed", subscription_ids: ["old"], revision: "previous" } }),
+  }, "fixture-token", null);
+  expect(deployments).toHaveLength(1);
+  expect(deployments![0].modelInfoObj).toMatchObject({ owner: "team", subscription_assignment: { mode: "priority", subscription_ids: ["preferred", "reserve"], revision: "previous" } });
+  expect(deployments![0].litellmParamsObj).toMatchObject({ model: "chatgpt/example", timeout: 20 });
+  expect(deployments![0].litellmParamsObj).not.toHaveProperty("api_key");
+  expect(deployments![0].litellmParamsObj).not.toHaveProperty("subscription_selection");
+  expect(deployments![0].litellmParamsObj).not.toHaveProperty("subscription_id");
+});
