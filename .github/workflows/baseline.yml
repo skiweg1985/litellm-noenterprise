@@ -16,7 +16,7 @@ jobs:
   baseline-amd64:
     name: Linux AMD64 baseline
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       IMAGE: litellm-noenterprise:ci
     steps:
@@ -55,6 +55,10 @@ jobs:
         run: |
           python3 scripts/test_identity.py "$IMAGE" --browser
           python3 scripts/test_identity.py "$IMAGE" --browser --browser-admin-disabled
+      - name: Exercise native OIDC setup and shared-worker activation
+        run: |
+          python3 scripts/test_identity.py "$IMAGE" --oidc-settings --proxy-workers 2 --test-pattern test_oidc_settings.py
+          python3 scripts/test_identity.py "$IMAGE" --oidc-settings --browser --browser-proxy-port 0
       - name: Exercise independent provider and subscription extensions
         run: python3 scripts/test_extensions.py "$IMAGE"
       - name: Exercise browser identity and provider-token API journeys
