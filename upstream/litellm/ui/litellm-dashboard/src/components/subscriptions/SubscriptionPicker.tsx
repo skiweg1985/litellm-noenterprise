@@ -18,6 +18,8 @@ export function useModelSubscriptions(accessToken: string | null) {
 
 export function subscriptionProblem(account: SubscriptionAccount | undefined, model?: string): string | null {
   if (!account) return "Select a subscription.";
+  if (account.state === "credential_rejected") return "Sign-in was rejected. Reconnect this subscription.";
+  if (!account.token_valid && account.state === "token_expired") return "Token renewal is required. Refresh subscriptions to check this connection.";
   if (account.retired || !account.token_valid)
     return "This subscription is disconnected or retired. Sign in or select another subscription.";
   if (!account.available_models)

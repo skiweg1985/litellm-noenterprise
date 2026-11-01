@@ -609,3 +609,26 @@ it("uses a subscription picker instead of API credentials for ChatGPT models", a
   expect(screen.queryByRole("combobox", { name: "Existing Credentials" })).not.toBeInTheDocument();
   expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
 });
+
+it("submits the ordered reserve selection through the native add form", async () => {
+  const { testQueryClient } = await import("../../../tests/test-utils");
+  testQueryClient.clear();
+  const auth = vi.mocked(await import("@/app/(dashboard)/hooks/useAuthorized"));
+  auth.default.mockReturnValue(mockAuthorizedUser("proxy_admin", "user-1", true));
+  const api = vi.mocked(await import("@/lib/http/chatgptSubscriptions"));
+  api.getSubscriptions.mockResolvedValue({ accounts: [
+    { account: "first", subscription_id: "first", display_name: "Primary", token_valid: true, retired: false, available_models: { models: [{ slug: "example-model", name: "Example" }], missing: [] } },
+    { account: "second", subscription_id: "second", display_name: "Reserve", token_valid: true, retired: false, available_models: { models: [{ slug: "example-model", name: "Example" }], missing: [] } },
+  ], problems: [] } as never);
+  const props = createTestProps();
+  props.form.setValue("custom_llm_provider", "CHATGPT");
+  renderWithProviders(<AddModelForm {...props} selectedProvider="CHATGPT" />);
+  await userEvent.click(await screen.findByRole("combobox", { name: "Subscription routing mode" }));
+  await userEvent.click(await screen.findByRole("option", { name: "Preferred subscription with reserves" }));
+  await userEvent.click(screen.getByRole("combobox", { name: "Add subscription" }));
+  await userEvent.click(await screen.findByRole("option", { name: "Primary" }));
+  await userEvent.click(screen.getByRole("combobox", { name: "Add subscription" }));
+  await userEvent.click(await screen.findByRole("option", { name: "Reserve" }));
+  await userEvent.click(screen.getByRole("button", { name: "Move Reserve up" }));
+  expect(props.mountedValues().subscription_selection).toEqual({ mode: "priority", subscription_ids: ["second", "first"] });
+});
