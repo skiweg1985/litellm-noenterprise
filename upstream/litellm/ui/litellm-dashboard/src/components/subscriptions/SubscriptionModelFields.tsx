@@ -31,10 +31,16 @@ export function SubscriptionModelFields({ accessToken }: { accessToken: string |
   const selectSubscription = (next: SubscriptionSelection) => {
     form.setValue("subscription_selection", next, { shouldDirty: true, shouldValidate: true });
     form.setValue("subscription_id", next.subscription_ids[0] ?? null);
-    const nextAccounts = next.subscription_ids.map((id) => accounts.find((account) => account.subscription_id === id));
+    const addedAccounts = next.subscription_ids
+      .filter((id) => !selection.subscription_ids.includes(id))
+      .map((id) => accounts.find((account) => account.subscription_id === id));
+    // Routing changes do not invalidate a model. Unknown catalogs must not erase
+    // the draft either; validation keeps submission blocked until they are known.
     if (
       Array.isArray(chosenModels) &&
-      chosenModels.some((model) => nextAccounts.some((account) => subscriptionProblem(account, String(model))))
+      chosenModels.some((model) =>
+        addedAccounts.some((account) => account?.available_models && subscriptionProblem(account, String(model))),
+      )
     ) {
       form.setValue("model", []);
       form.setValue("model_mappings", []);
