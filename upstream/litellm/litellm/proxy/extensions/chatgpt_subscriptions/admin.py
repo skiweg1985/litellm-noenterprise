@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import inspect
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import tokens
 from .service import MonitoringError, UsageService, ModelsService
+from .availability import ModelAvailability, model_availability
 
 logger = logging.getLogger("chatgpt_subscriptions")
 
@@ -42,10 +44,20 @@ class SubscriptionList(BaseModel):
     problems: list[dict]
 
 
+def require_admin_identity(auth):
+    """One role/source rule for subscription management and model assignment."""
+    from litellm.proxy._types import LitellmUserRoles
+
+    if getattr(auth, "oidc_identity_source", None) == "provider":
+        raise HTTPException(403, "Use an administrator browser session or native admin key.")
+    if getattr(auth, "user_role", None) not in {LitellmUserRoles.PROXY_ADMIN, LitellmUserRoles.PROXY_ADMIN.value}:
+        raise HTTPException(403, "Proxy admin role required.")
+    return auth
+
+
 def litellm_admin():
     """LiteLLM's own key check; the UI session key or any admin key passes."""
     try:
-        from litellm.proxy._types import LitellmUserRoles
         from litellm.proxy.auth.user_api_key_auth import user_api_key_auth
     except ImportError:
 
@@ -54,14 +66,8 @@ def litellm_admin():
 
         return unavailable
 
-    admin_roles = {LitellmUserRoles.PROXY_ADMIN, LitellmUserRoles.PROXY_ADMIN.value}
-
     def require_admin(auth=Depends(user_api_key_auth)):
-        if getattr(auth, "oidc_identity_source", None) == "provider":
-            raise HTTPException(403, "Use an administrator browser session or native admin key.")
-        if getattr(auth, "user_role", None) not in admin_roles:
-            raise HTTPException(403, "Proxy admin role required.")
-        return auth
+        return require_admin_identity(auth)
 
     return require_admin
 
@@ -72,7 +78,7 @@ NO_SUBSCRIPTION = "no_subscription"
 UNKNOWN_SUBSCRIPTION = "unknown_subscription"
 
 
-def resolve_deployments(model_list, credential_values, known):
+def resolve_deployments(model_list, credential_values, known, subscription_accounts=None):
     """ChatGPT deployments with model name, id, credential and subscription.
 
     The subscription comes from api_key "chatgpt-account:<name>", set directly
@@ -83,6 +89,19 @@ def resolve_deployments(model_list, credential_values, known):
     for deployment in model_list or []:
         params = deployment.get("litellm_params") or {}
         if not str(params.get("model", "")).startswith("chatgpt/"):
+            continue
+        assignment = (deployment.get("model_info") or {}).get("subscription_assignment")
+        if assignment:
+            for subscription_id in assignment.get("subscription_ids", []):
+                account = (subscription_accounts or {}).get(subscription_id)
+                found.append({
+                    "model_name": deployment.get("model_name"),
+                    "slug": str(params["model"]).split("/", 1)[1],
+                    "id": (deployment.get("model_info") or {}).get("id"),
+                    "credential": None,
+                    "account": account,
+                    "problem": None if account in known else UNKNOWN_SUBSCRIPTION,
+                })
             continue
         credential = params.get("litellm_credential_name") or None
         api_key, problem = params.get("api_key"), None
@@ -117,18 +136,33 @@ def _credential_values(name):
     return None
 
 
-def chatgpt_deployments():
-    """ChatGPT deployments of the running proxy, see resolve_deployments."""
+async def saved_deployments():
+    """Resolve saved membership, including edits not yet in this worker's router."""
+    from .model_assignment import _params
     try:
-        from litellm.proxy.proxy_server import llm_router
+        from litellm.proxy.proxy_server import llm_router, prisma_client
     except ImportError:
         return []
-    if llm_router is None:
-        return []
-    # model_list holds the deployments only; get_model_list() adds routing groups.
-    return resolve_deployments(
-        llm_router.model_list, _credential_values, set(tokens.configured_accounts())
-    )
+    models = list(llm_router.model_list) if llm_router is not None else []
+    if prisma_client is not None:
+        # DB rows are authoritative for saved models, including deletion. Keep
+        # configuration-only deployments and their legacy credential selectors.
+        rows = await prisma_client.db.litellm_proxymodeltable.find_many()
+        models = [d for d in models if not (d.get("model_info") or {}).get("db_model")]
+        models.extend({"model_name": row.model_name,
+                       "litellm_params": _params(row.litellm_params),
+                       "model_info": {**(row.model_info or {}), "id": row.model_id, "blocked": bool(row.blocked)}}
+                      for row in rows)
+    return models
+
+
+async def chatgpt_deployments():
+    from .accounts import Accounts
+
+    models = await saved_deployments()
+    accounts = await asyncio.to_thread(Accounts)
+    by_id = {account.status()["subscription_id"]: account.name for account in accounts}
+    return resolve_deployments(models, _credential_values, set(by_id.values()), by_id)
 
 
 def problems(deployments):
@@ -203,7 +237,19 @@ def router(accounts, services, dependency=None, deployments=None, requests=None,
     async def ui():
         return RedirectResponse("/ui/chatgpt-subscriptions/", status_code=307, headers=NO_STORE)
 
-    async def describe(account):
+    @api.get("/chatgpt/api/models/{model_id}/availability", response_model=ModelAvailability)
+    async def availability(model_id: str):
+        snapshot = await saved_deployments()
+        parent = next((d for d in snapshot if (d.get("model_info") or {}).get("id") == model_id), None)
+        if parent is None:
+            raise HTTPException(404, "Unknown model.")
+        return JSONResponse((await model_availability(parent, accounts)).model_dump(), headers=NO_STORE)
+
+    async def deployment_snapshot():
+        result = deployments()
+        return await result if inspect.isawaitable(result) else result
+
+    async def describe(account, snapshot=None):
         services.setdefault(account.name, UsageService(account=account.name, path=account.path, transport=account.transport))
         catalogs.setdefault(account.name, ModelsService(account=account.name, path=account.path, transport=account.transport))
         status = account.status()
@@ -213,7 +259,9 @@ def router(accounts, services, dependency=None, deployments=None, requests=None,
                 quota = await services[account.name].get()
             except MonitoringError as exc:
                 quota_error = str(exc)
-        own = [d for d in deployments() if d["account"] == account.name]
+        if snapshot is None:
+            snapshot = await deployment_snapshot()
+        own = [d for d in snapshot if d["account"] == account.name]
         available, available_error = None, None
         if status["token_valid"] and account.name in catalogs:
             try:
@@ -246,10 +294,11 @@ def router(accounts, services, dependency=None, deployments=None, requests=None,
 
     @api.get(API, response_model=SubscriptionList)
     async def list_accounts():
+        snapshot = await deployment_snapshot()
         return JSONResponse(
             {
-                "accounts": [await describe(account) for account in accounts],
-                "problems": problems(deployments()),
+                "accounts": [await describe(account, snapshot) for account in accounts],
+                "problems": problems(snapshot),
             },
             headers=NO_STORE,
         )

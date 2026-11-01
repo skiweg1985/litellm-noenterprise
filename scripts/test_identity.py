@@ -304,6 +304,14 @@ general_settings:
             time.sleep(1)
         else:
             raise RuntimeError("proxy did not become ready")
+        if args.proxy_workers > 1:
+            for _ in range(120):
+                logs = docker("logs", prefix + "-proxy", check=False)
+                if (logs.stdout + logs.stderr).count("Application startup complete") >= args.proxy_workers:
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError("All proxy workers did not become ready")
         if args.browser:
             ui = root / "upstream/litellm/tests/e2e/ui"
             subprocess.run(

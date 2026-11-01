@@ -7,6 +7,10 @@ import type { CredentialItem } from "@/components/networking";
 import ModelInfoEditForm from "./ModelInfoEditForm";
 
 vi.mock("@/lib/http/chatgptSubscriptions", () => ({
+  getSubscriptionAvailability: vi.fn().mockResolvedValue({
+    model_id: "model-one", assignment_revision: "fixture", state: "eligible", checked_at: 1,
+    cooldown_scope: "worker", members: [{ subscription_id: "subscription-one", state: "eligible" }],
+  }),
   getSubscriptions: vi.fn().mockResolvedValue({
     accounts: [
       {

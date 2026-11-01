@@ -25,6 +25,24 @@ def capacity_deployment(deployment):
     return member["parent"] if member else deployment
 
 
+def member_model_id(parent_id, subscription_id, mode):
+    return parent_id if mode == "fixed" else str(uuid5(NAMESPACE_URL, parent_id + ":" + subscription_id))
+
+
+def connection_eligible(status):
+    return not status["retired"] and (status["token_valid"] or status["state"] == "token_expired")
+
+
+async def member_cooldowns(router, member_ids):
+    rows = await router.cooldown_cache.async_get_active_cooldowns(
+        model_ids=member_ids, parent_otel_span=None
+    )
+    # Credential rejection is separately tied to the current token fingerprint;
+    # a renewed credential does not inherit the old generation's 401 cooldown.
+    return {identifier: detail for identifier, detail in (rows or [])
+            if str(detail.get("status_code")) not in ("401", "403")}
+
+
 def unavailable(
     message="No assigned subscription is available. Reconnect a subscription or retry after its cooldown.",
 ):
@@ -36,9 +54,14 @@ def unavailable(
 
 
 async def hydrate_missing_parent(router, model):
-    """Make a newly saved managed parent usable on a sibling worker immediately."""
+    """Discover managed DB assignments, including a cached unmanaged conversion."""
+    if not isinstance(model, str) or not model:
+        return
     name = router.get_model_from_alias(model=model) or model
-    if name in router.model_names or router.get_deployment(model_id=name) is not None:
+    cached = [d for d in router.model_list
+              if d.get("model_name") == name or (d.get("model_info") or {}).get("id") == name]
+    if cached and all((d.get("model_info") or {}).get(ASSIGNMENT) or
+                      not (d.get("model_info") or {}).get("db_model") for d in cached):
         return
     from litellm.proxy.proxy_server import prisma_client
 
@@ -197,18 +220,10 @@ async def expand_candidates(router, candidates, request_kwargs=None):
         if account is None:
             continue
         status = account.status()
-        if status["retired"] or not (
-            status["token_valid"] or status["state"] == "token_expired"
-        ):
+        if not connection_eligible(status):
             continue
         candidate = deepcopy(parent)
-        model_id = (
-            parent["model_info"]["id"]
-            if assignment.mode == "fixed"
-            else str(
-                uuid5(NAMESPACE_URL, parent["model_info"]["id"] + ":" + identifier)
-            )
-        )
+        model_id = member_model_id(parent["model_info"]["id"], identifier, assignment.mode)
         if assignment.mode != "fixed" and model_id in attempted:
             continue
         candidate["model_info"]["id"] = model_id
@@ -226,18 +241,7 @@ async def expand_candidates(router, candidates, request_kwargs=None):
                 index + 1 if assignment.mode == "priority" else 1
             )
         result.append(candidate)
-    # Native cooldown store, explicitly queried for ephemeral member IDs rather
-    # than only the parent's registered router ID.
-    cooldowns = await router.cooldown_cache.async_get_active_cooldowns(
-        model_ids=[d["model_info"]["id"] for d in result], parent_otel_span=None
-    )
-    # A credential rejection is tied to the token fingerprint above. A newly
-    # authorized generation recovers immediately instead of inheriting that 401.
-    blocked = {
-        entry[0]
-        for entry in (cooldowns or [])
-        if str(entry[1].get("status_code")) not in ("401", "403")
-    }
+    blocked = await member_cooldowns(router, [d["model_info"]["id"] for d in result])
     result = [d for d in result if d["model_info"]["id"] not in blocked]
     if not result:
         raise unavailable()

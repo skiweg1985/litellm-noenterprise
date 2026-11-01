@@ -3,6 +3,7 @@ import { useWatch, type UseFormReturn } from "react-hook-form";
 import { FormField } from "@/components/shared/form/FormField";
 import type { ModelEditFormValues } from "@/components/ModelInfoEditForm";
 import { useModelSubscriptions } from "./SubscriptionPicker";
+import { SubscriptionAvailability } from "./SubscriptionAvailability";
 import { SubscriptionAssignmentEditor } from "./SubscriptionAssignmentEditor";
 
 export function SubscriptionEditField({
@@ -47,6 +48,10 @@ export function SubscriptionEditField({
           />
         )}
       </FormField>
+      {isDbModel && selection && (
+        <SubscriptionAvailability accessToken={accessToken} modelId={deploymentId}
+          names={Object.fromEntries(accounts.map((account) => [account.subscription_id, account.display_name || account.account]))} />
+      )}
       {!isDbModel && (
         <p className="text-sm text-muted-foreground">
           Configuration-backed model. Its subscription assignment is read-only here.

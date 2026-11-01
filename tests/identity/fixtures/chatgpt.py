@@ -112,4 +112,11 @@ async def responses(request: Request):
             state['active'] -= 1
     return StreamingResponse(stream(), media_type='text/event-stream')
 
+@app.post('/chat/completions')
+async def unmanaged_completion():
+    return {"id": "chatcmpl-synthetic-unmanaged", "object": "chat.completion", "created": int(time.time()),
+            "model": "gpt-4o-mini", "choices": [{"index": 0, "message": {"role": "assistant", "content": "OLD_UNMANAGED"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+
+
 uvicorn.run(app, host='0.0.0.0', port=8091, log_level='warning')

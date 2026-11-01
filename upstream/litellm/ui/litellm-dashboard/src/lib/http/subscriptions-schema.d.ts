@@ -158,6 +158,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chatgpt/api/models/{model_id}/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Availability */
+        get: operations["availability_chatgpt_api_models__model_id__availability_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -166,6 +183,39 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** MemberAvailability */
+        MemberAvailability: {
+            /** Retry At */
+            retry_at?: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "eligible" | "cooldown" | "disconnected" | "retired" | "credential_rejected" | "missing";
+            /** Subscription Id */
+            subscription_id: string;
+        };
+        /** ModelAvailability */
+        ModelAvailability: {
+            /** Assignment Revision */
+            assignment_revision: string | null;
+            /** Checked At */
+            checked_at: number;
+            /**
+             * Cooldown Scope
+             * @enum {string}
+             */
+            cooldown_scope: "worker" | "shared";
+            /** Members */
+            members: components["schemas"]["MemberAvailability"][];
+            /** Model Id */
+            model_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "eligible" | "unavailable" | "paused";
         };
         /** SubscriptionAssignment */
         SubscriptionAssignment: {
@@ -536,6 +586,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubscriptionDescription"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    availability_chatgpt_api_models__model_id__availability_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelAvailability"];
                 };
             };
             /** @description Validation Error */
