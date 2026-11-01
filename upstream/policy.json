@@ -1,0 +1,35 @@
+{
+  "version": "1.106.6",
+  "revision": "61c6ab78393ef45683dd7d963d2a315bd845e20b",
+  "archive_url": "https://codeload.github.com/BerriAI/litellm/tar.gz/61c6ab78393ef45683dd7d963d2a315bd845e20b",
+  "archive_sha256": "17e8963fdf67cbfa8091628b1b9a42feb16553fcd9aa5d327963f1ab7727cfd2",
+  "include": [
+    "LICENSE",
+    "README.md",
+    "pyproject.toml",
+    "uv.lock",
+    "schema.prisma",
+    "model_prices_and_context_window.json",
+    "provider_endpoints_support.json",
+    "policy_templates.json",
+    "litellm/",
+    "litellm-proxy-extras/",
+    "ui/litellm-dashboard/",
+    "tests/",
+    "litellm-rust/"
+  ],
+  "exclude": [
+    "enterprise/",
+    "litellm/proxy/enterprise",
+    "litellm/proxy/_experimental/out/",
+    "litellm-proxy-extras/dist/",
+    "litellm/router_strategy/complexity_router/capability_classifier.py",
+    "tests/llm_translation/test_skills_data/slack-gif-creator.zip",
+    "tests/llm_translation/test_skills_data/test-skill.zip",
+    "tests/local_testing/.litellm_cache/cache.db"
+  ],
+  "licenses": {
+    "LICENSE": "b170d6bf8e8835dd357e011681db028f4d51e2fb0ea892058f56e01fb39b8273",
+    "litellm-proxy-extras/LICENSE": "b170d6bf8e8835dd357e011681db028f4d51e2fb0ea892058f56e01fb39b8273"
+  }
+}

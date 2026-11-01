@@ -1,0 +1,9 @@
+.git
+.venv
+**/__pycache__
+**/node_modules
+**/.next
+.build
+.env
+upstream/litellm/tests
+upstream/litellm/litellm-rust
