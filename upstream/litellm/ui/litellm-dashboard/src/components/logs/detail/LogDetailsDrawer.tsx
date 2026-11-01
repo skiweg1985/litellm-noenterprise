@@ -15,7 +15,6 @@ import { sessionSpendLogsCall } from "../../networking";
 import { useQuery } from "@tanstack/react-query";
 import { getSpendString } from "@/utils/dataUtils";
 import { normalizeGuardrailEntries, sortSessionLogs, SessionLogSortMode } from "./utils";
-import { DRAWER_WIDTH } from "./constants";
 import { useLogDetails } from "@/app/(dashboard)/hooks/logDetails/useLogDetails";
 import { useUserLookup } from "@/app/(dashboard)/hooks/users/useUsers";
 
@@ -30,8 +29,6 @@ export interface LogDetailsDrawerProps {
   startTime?: string;
   backTo?: DrawerBackTo;
 }
-
-const SIDEBAR_WIDTH_PX = 224;
 
 // Session logs are fetched page-by-page from the paginated backend and
 // accumulated so the drawer can show the whole session. page_size is the
@@ -310,13 +307,12 @@ export function LogDetailsDrawer({
       <SheetContent
         side="right"
         showCloseButton={false}
-        className="gap-0 overflow-hidden p-0 data-[side=right]:sm:max-w-none"
-        style={{ width: DRAWER_WIDTH }}
+        className="gap-0 overflow-hidden p-0 data-[side=right]:w-full data-[side=right]:sm:w-3/5 data-[side=right]:sm:max-w-none"
       >
         <SheetTitle className="sr-only">
           {logEntry?.request_id ? `Request ${logEntry.request_id} details` : "Request details"}
         </SheetTitle>
-        <div style={{ height: "100%" }} className="flex relative">
+        <div className="relative flex h-full min-h-0 flex-col sm:flex-row">
           {!isSidebarCollapsed && (
             <SidebarToggle
               isCollapsed={false}
@@ -325,7 +321,7 @@ export function LogDetailsDrawer({
             />
           )}
           {!isSidebarCollapsed && (
-            <div className="border-r border-border bg-muted flex flex-col" style={{ width: SIDEBAR_WIDTH_PX }}>
+            <div className="flex max-h-48 w-full shrink-0 flex-col border-b border-border bg-muted sm:max-h-none sm:w-56 sm:border-r sm:border-b-0">
               <div className="pl-12 pr-3 py-2 border-b border-border bg-card">
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -452,7 +448,7 @@ export function LogDetailsDrawer({
             </div>
           )}
 
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <DrawerHeader
               log={currentLog}
               onClose={onClose}
