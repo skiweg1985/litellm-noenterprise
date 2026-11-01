@@ -4,7 +4,50 @@ The independent OIDC integration uses the existing LiteLLM user database and
 personal connection page. It supports independent browser and provider-token API
 grants and personal MCP connections without enabling premium features.
 
-## Configure a provider
+## Configure in the dashboard
+
+Open **Settings → Admin Settings → SSO Settings** as a full proxy administrator.
+Choose **Configure OpenID Connect** and enter the issuer, application ID and
+client secret. Register the displayed callback URL with your provider. The
+**Check provider** action checks discovery compatibility; it does not test the
+credential or complete a user sign-in.
+
+Use the admission rule to choose who may create an account and sign in later.
+Add role mappings in priority order: the first matching rule wins. Choose a
+minimal default role for admitted users without a matching mapping. Optional
+sections configure provider-token API access and personal MCP access. Advanced
+options expose claim formats, stable identity, token types and session lifetime.
+The sections below explain these existing policies in more detail.
+
+**Save changes** validates and activates the complete setup. Subsequent requests
+on each proxy worker use the saved configuration; an already running request can
+finish with its original settings. Invalid input, failed discovery or a concurrent
+edit leaves the active setup unchanged. Review a concurrent edit before saving
+again. Material changes require existing OIDC browser users to sign in again.
+A successful save is not proof of interoperability with your provider: complete
+an eligible user login and verify the intended role and API permissions.
+
+Database-managed client and session secrets are encrypted using LiteLLM's existing
+credential encryption. Keep `LITELLM_SALT_KEY` stable across replicas and backups;
+when absent, the existing encryption helper uses the master key. The database,
+master key and compatible authentication configuration must be available before
+setup. The session secret is generated once and retained across ordinary saves.
+The form reports whether a secret exists and never displays its value. Leave the
+replacement credential field empty to retain the stored client secret.
+
+If either OIDC section is managed in the configuration file, the combined setup
+is read-only in the dashboard. Edit the deployment configuration and restart all
+replicas consistently instead. Existing environment-variable secret references
+remain supported. File configuration takes precedence over database settings.
+
+Existing legacy SSO settings are retained separately. Enabled independent OIDC
+takes precedence. **Disable OpenID Connect** stops independent OIDC sessions and
+restores the configured legacy sign-in path, if present; it retains the setup,
+users and personal MCP connections. Native administrator recovery remains at
+`/fallback/login`, including when the provider is unavailable. Provider access
+tokens and view-only administrators cannot administer these settings.
+
+## Configure through deployment files
 
 Register a confidential web application with an exact callback URL, for example
 `https://llm.example.org/oidc/callback`. Enable the authorization-code flow and
@@ -90,8 +133,9 @@ Sessions expire after `session_ttl_seconds` (default one hour). Admission loss
 observed at a later login, or changed role/policy claims, revokes earlier browser
 sessions. Changes at the provider are not pushed to LiteLLM: until a new login
 observes them, existing sessions remain valid up to their configured lifetime.
-Configuration changes and session-secret rotation require a fresh login. Restart
-all replicas consistently after changing configuration or secrets.
+Configuration changes and session-secret rotation require a fresh login. Dashboard
+changes activate on subsequent requests. Restart all replicas consistently after
+changing file configuration or deployment secrets.
 
 The reserved identity snapshot in user metadata is integrity protected. Native
 metadata edits cannot mint trusted claims. Policy changes also destroy old
@@ -151,7 +195,8 @@ general_settings:
 ordered role mappings. The [APISettings schema](../upstream/litellm/litellm/proxy/auth/oidc_api.py)
 is the configuration reference. `resource` is the public proxy origin, without a
 path. Sub-path deployments are not supported by this metadata configuration.
-Restart all replicas after changing configuration.
+Dashboard changes activate on subsequent requests; restart all replicas after
+changing file configuration.
 
 `scopes[].name` is the scope a client requests and sees in discovery;
 `token_value` is the value required in the validated token. All listed scopes
@@ -269,7 +314,8 @@ entitlements combine direct server grants, tool permissions, toolsets and access
 groups; tool restrictions and explicit MCP opt-out remain binding. Servers without a rule
 retain their existing LiteLLM permissions. Rule claims are retained automatically;
 API requests use their current verified token claims, never the browser's saved
-role. Configuration changes require restarting the proxy.
+role. Dashboard changes activate on subsequent requests; file changes require
+restarting the proxy.
 
 For managed OAuth, configure a registered upstream client ID and any required
 client secret using LiteLLM's existing server configuration. Managed per-user
@@ -283,7 +329,7 @@ the browser returns through `/ui/mcp/oauth/callback`. The code binds the verifie
 user, server, client redirect URI and verifier. Alias/root token routes cannot
 redeem this managed flow anonymously. The managed exchange stores credentials
 server-side and returns connection status without access or refresh tokens.
-The existing UI integration is being adapted to this response in issue #7.
+The personal connection page handles this status response without exposing tokens.
 
 Connections use the existing encrypted per-user, per-server database records.
 Keep `LITELLM_SALT_KEY` stable and protected together with database backups, as
