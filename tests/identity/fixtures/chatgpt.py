@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 
 app = FastAPI()
-state = {"identity": "seat-a", "catalog_error": False, "status": 200, "seen": [], "statuses": [], "stream_error": False, "delay": 0, "status_by_identity": {}, "requests": []}
+state = {"identity": "seat-a", "catalog_error": False, "status": 200, "seen": [], "statuses": [], "stream_error": False, "delay": 0, "status_by_identity": {}, "retry_after_by_identity": {}, "requests": []}
 codes = {}
 fixtures = json.loads((Path(__file__).parents[2] / "deployment_patches/fixtures/chatgpt_sse.json").read_text())
 
@@ -23,7 +23,7 @@ def jwt(identity):
 @app.post('/control')
 async def control(request: Request):
     changes = await request.json()
-    for key in ('identity', 'catalog_error', 'status', 'statuses', 'stream_error', 'delay', 'status_by_identity'):
+    for key in ('identity', 'catalog_error', 'status', 'statuses', 'stream_error', 'delay', 'status_by_identity', 'retry_after_by_identity'):
         if key in changes:
             state[key] = changes[key]
     if changes.get('clear'):
@@ -80,7 +80,9 @@ async def responses(request: Request):
     response_id = 'resp_' + uuid.uuid4().hex
     state['requests'].append({'identity': identity, 'status': status, 'response_id': response_id})
     if status != 200:
-        return JSONResponse({"error": {"type": "server_error", "message": "Synthetic upstream failure"}}, status_code=status)
+        retry_after = state['retry_after_by_identity'].get(identity)
+        headers = {'retry-after': str(retry_after)} if retry_after is not None else {}
+        return JSONResponse({"error": {"type": "server_error", "message": "Synthetic upstream failure"}}, status_code=status, headers=headers)
     events = json.loads(json.dumps(fixtures['text']).replace('resp_synthetic', response_id))
     stream_error, delay = state['stream_error'], state['delay']
     async def stream():
