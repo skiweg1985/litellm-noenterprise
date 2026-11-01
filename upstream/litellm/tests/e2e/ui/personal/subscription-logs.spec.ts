@@ -83,6 +83,10 @@ test("subscription logs preserve dispatch attribution and support named filter d
     await expect(row).toHaveCount(1);
     await expect(page.getByRole("columnheader", { name: "Subscription", exact: true })).toBeVisible();
     await row.getByText(label, { exact: true }).click();
+    if (testInfo.project.name === "phone") {
+      const viewport = page.viewportSize()!;
+      await expect.poll(async () => (await page.getByRole("dialog").boundingBox())?.width ?? 0).toBeGreaterThan(viewport.width * 0.9);
+    }
     const attempts = page.getByRole("list", { name: "Subscription attempts", exact: true });
     await expect(attempts.getByRole("listitem")).toHaveCount(1);
     await expect(attempts.getByText(label, { exact: true })).toBeVisible();
