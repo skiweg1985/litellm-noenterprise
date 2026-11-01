@@ -114,3 +114,8 @@ isolation. It uses installed image code by default; `--source-overlay` is an
 explicit development option. No live provider credentials are needed. These
 checks do not establish live provider compatibility or the final MCP connection
 workflow, which has its own acceptance work.
+
+Validation on 2026-11-01 passed all 13 HTTP journeys against the installed ARM64
+image, without a source overlay, plus the missing-master-key startup rejection.
+The source audit and six baseline tests passed; the image audit found no
+excluded enterprise package paths in any of its 12 final layers.
