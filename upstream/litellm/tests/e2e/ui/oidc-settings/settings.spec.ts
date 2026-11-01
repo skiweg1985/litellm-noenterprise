@@ -119,15 +119,44 @@ test("native SSO form activates complete OIDC policy and preserves it across con
   await expect(page.getByLabel("Client secret", { exact: true })).toHaveCount(
     0,
   );
-  const replaced = await request
+
+  // A committed save can lose its response: the UI must report an unknown outcome.
+  await page
+    .getByLabel("Session lifetime in seconds", { exact: true })
+    .fill("4000");
+  await page.route("**/oidc/settings", async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+    await route.fetch();
+    await route.abort("connectionreset");
+  });
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("could not be confirmed");
+  await expect(
+    page.getByLabel("Session lifetime in seconds", { exact: true }),
+  ).toHaveValue("4000");
+  await page.unroute("**/oidc/settings");
+  const afterLostResponse = await request
     .get(`${proxyHTTP}/oidc/settings`, { headers: adminHeaders })
     .then((r) => r.json());
+  expect(afterLostResponse.browser.session_ttl_seconds).toBe(4000);
+  await page
+    .getByRole("button", { name: "Reload saved settings", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Discard edits and reload", exact: true })
+    .click();
+  await expect(
+    page.getByLabel("Session lifetime in seconds", { exact: true }),
+  ).toHaveValue("4000");
 
   // A second administrator changes the same revision through the public API.
   await request.put(`${proxyHTTP}/oidc/settings`, {
     headers: adminHeaders,
     data: {
-      expected_revision: replaced.revision,
+      expected_revision: afterLostResponse.revision,
       browser: { ...saved.browser, session_ttl_seconds: 7200 },
       api: saved.api,
     },

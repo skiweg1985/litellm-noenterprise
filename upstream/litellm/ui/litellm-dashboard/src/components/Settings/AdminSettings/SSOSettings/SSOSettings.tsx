@@ -47,7 +47,7 @@ function Settings({ accessToken, isOidcSession }: { accessToken: string; isOidcS
   if (failed)
     return (
       <div className="space-y-3" role="alert">
-        <p>Sign-in settings could not be loaded. Your configuration has not changed.</p>
+        <p>Sign-in settings could not be loaded. Try again to check the current configuration.</p>
         <Button
           onClick={() => {
             setFailed(false);
@@ -62,8 +62,11 @@ function Settings({ accessToken, isOidcSession }: { accessToken: string; isOidcS
     return (
       <div role="alert" className="space-y-3">
         <p>Your settings were saved. Your current sign-in has ended.</p>
-        <a className="underline" href="/oidc/login">
-          Sign in again
+        <a
+          className="underline"
+          href={settings?.enabled ? "/oidc/login" : settings?.recovery_login_url ?? "/fallback/login"}
+        >
+          {settings?.enabled ? "Sign in again" : "Sign in with a native administrator account"}
         </a>
         <p>
           <a className="underline" href="/fallback/login">
