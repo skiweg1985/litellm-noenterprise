@@ -200,7 +200,11 @@ class OIDCSettingsTests(unittest.TestCase):
         key = flow.client.post(
             "/key/generate",
             headers={"Authorization": "Bearer " + MASTER},
-            json={"user_id": subject, "models": ["fixture-model"]},
+            json={
+                "user_id": subject,
+                "models": ["fixture-model"],
+                "object_permission": {"mcp_servers": ["managed_a"]},
+            },
         )
         self.assertEqual(key.status_code, 200, key.text)
         native = {"Authorization": "Bearer " + key.json()["key"]}
@@ -593,6 +597,54 @@ class OIDCSettingsTests(unittest.TestCase):
 
         asyncio.run(damage_and_check())
 
+    def test_stored_legacy_saml_setup_remains_visible_without_environment_mutation(
+        self,
+    ):
+        import asyncio
+        from prisma import Json, Prisma
+
+        async def verify():
+            db = Prisma()
+            await db.connect()
+            try:
+                await db.litellm_ssoconfig.upsert(
+                    where={"id": "sso_config"},
+                    data={
+                        "create": {
+                            "id": "sso_config",
+                            "sso_settings": Json(
+                                {
+                                    "saml_idp_metadata_xml": "<EntityDescriptor entityID='https://fixture.invalid' />"
+                                }
+                            ),
+                        },
+                        "update": {
+                            "sso_settings": Json(
+                                {
+                                    "saml_idp_metadata_xml": "<EntityDescriptor entityID='https://fixture.invalid' />"
+                                }
+                            )
+                        },
+                    },
+                )
+                for _ in range(8):
+                    response = httpx.get(
+                        BASE + "/oidc/settings",
+                        headers={
+                            "Authorization": "Bearer " + MASTER,
+                            "Connection": "close",
+                        },
+                        trust_env=False,
+                    )
+                    self.assertEqual(response.status_code, 200, response.text)
+                    self.assertTrue(response.json()["legacy_sso_configured"])
+                    self.assertNotIn("EntityDescriptor", response.text)
+            finally:
+                await db.litellm_ssoconfig.delete(where={"id": "sso_config"})
+                await db.disconnect()
+
+        asyncio.run(verify())
+
     def test_generic_configuration_cannot_bypass_oidc_activation(self):
         current = self.enabled()
         admin = {"Authorization": "Bearer " + MASTER}
@@ -669,6 +721,20 @@ class OIDCSettingsTests(unittest.TestCase):
     os.environ.get("OIDC_SETTINGS_MODE") == "true", "requires file-owned OIDC fixture"
 )
 class FileOwnershipTests(unittest.TestCase):
+    def test_native_recovery_login_keeps_the_existing_fixture_password(self):
+        password = (
+            "fixture-settings-admin-only"
+            if os.environ.get("OIDC_SETTINGS_FILE_NULL") == "true"
+            else MASTER
+        )
+        response = httpx.post(
+            BASE + "/v2/login",
+            json={"username": "admin", "password": password},
+            trust_env=False,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["token"])
+
     def test_file_configuration_is_read_only_and_secrets_stay_in_environment(self):
         admin = {"Authorization": "Bearer " + MASTER}
         response = httpx.get(BASE + "/oidc/settings", headers=admin, trust_env=False)

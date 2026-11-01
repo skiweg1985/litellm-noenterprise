@@ -230,15 +230,64 @@ def repository() -> ConfigRepository:
     return ConfigRepository(prisma_client, use_writer=True)
 
 
+async def legacy_configured() -> bool:
+    """Keep existing legacy setup discoverable without loading its credentials."""
+    import json
+    from litellm.proxy.auth.auth_utils import has_user_setup_sso
+    from litellm.proxy.common_utils.encrypt_decrypt_utils import (
+        decrypt_if_encrypted_with,
+        get_salt_key,
+    )
+    from litellm.proxy.proxy_server import prisma_client
+    from litellm.repositories.table_repositories import SSOConfigRepository
+
+    if has_user_setup_sso():
+        return True
+    if prisma_client is None:
+        return False
+    try:
+        record = await SSOConfigRepository(
+            prisma_client, use_writer=True
+        ).table.find_unique(where={"id": "sso_config"})
+        if record is None:
+            return False
+        raw = record.sso_settings
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        if not isinstance(raw, dict):
+            return bool(raw)
+        key = get_salt_key()
+        for field in (
+            "microsoft_client_id",
+            "google_client_id",
+            "generic_client_id",
+            "saml_idp_metadata_url",
+            "saml_idp_metadata_xml",
+        ):
+            value = raw.get(field)
+            if not isinstance(value, str):
+                continue
+            decrypted = decrypt_if_encrypted_with(value, key) if key else None
+            # Older legacy rows may contain plaintext identifying fields.
+            if (decrypted if decrypted is not None else value).strip():
+                return True
+        return False
+    except Exception:
+        problem(
+            503,
+            "configuration_unavailable",
+            "Legacy SSO status could not be read. Reload settings to check the active configuration.",
+        )
+
+
 async def describe(bundle: StoredBundle | None = None) -> SettingsResponse:
     from litellm.proxy.proxy_server import general_settings
     from litellm.proxy._experimental.mcp_server.mcp_server_manager import (
         global_mcp_server_manager,
     )
-    from litellm.proxy.auth.auth_utils import has_user_setup_sso
 
     result = SettingsResponse(
-        prerequisites=prerequisites(), legacy_sso_configured=has_user_setup_sso()
+        prerequisites=prerequisites(), legacy_sso_configured=await legacy_configured()
     )
     result.mcp_servers = [
         MCPServerChoice(
