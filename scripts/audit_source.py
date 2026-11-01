@@ -7,11 +7,27 @@ import subprocess
 import tarfile
 
 parser=argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--vendor-ref',default='vendor/litellm')
+parser.add_argument('--vendor-ref', help='vendor snapshot (default: local vendor/litellm, then origin/vendor/litellm)')
 parser.add_argument('--history-ref',default='HEAD')
 args=parser.parse_args()
 def git(*parts):
-    return subprocess.check_output(['git',*parts])
+    try:
+        return subprocess.check_output(['git',*parts], stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as error:
+        detail = error.stderr.decode(errors='replace').strip()
+        parser.error(f'required Git history or snapshot data is unavailable: {detail}. Run git fetch origin and check --vendor-ref/--history-ref before retrying')
+
+if git('rev-parse', '--is-shallow-repository').strip() == b'true':
+    parser.error('a shallow checkout cannot establish a complete history audit; run git fetch --unshallow origin, then fetch the vendor branch and retry')
+git('rev-parse', '--verify', '--end-of-options', args.history_ref+'^{commit}')
+if args.vendor_ref is None:
+    for candidate in ('refs/heads/vendor/litellm', 'refs/remotes/origin/vendor/litellm'):
+        exists = subprocess.run(['git', 'rev-parse', '--verify', '--quiet', candidate+'^{commit}'], capture_output=True)
+        if exists.returncode == 0:
+            args.vendor_ref = candidate
+            break
+    else:
+        parser.error('vendor snapshot is missing; run git fetch origin refs/heads/vendor/litellm:refs/remotes/origin/vendor/litellm or supply --vendor-ref')
 manifest=json.loads(git('show',args.vendor_ref+':upstream/manifest.json'))
 policy=json.loads(git('show',args.vendor_ref+':upstream/policy.json'))
 expected=manifest['files']

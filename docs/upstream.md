@@ -43,6 +43,21 @@ python3 scripts/audit_source.py
 The staging output must be absent or empty. Do not unpack an unfiltered archive
 into this repository or fetch upstream Git history into it.
 
+A normal full clone can run the audit directly: it uses local `vendor/litellm`
+when present, otherwise `origin/vendor/litellm`. For a checkout that fetched only
+one branch, fetch this project's reviewed vendor branch explicitly:
+
+```sh
+git fetch origin refs/heads/vendor/litellm:refs/remotes/origin/vendor/litellm
+python3 scripts/audit_source.py
+```
+
+The history audit rejects shallow checkouts. Use `git fetch --unshallow origin`
+first, or configure CI checkout with full history (`fetch-depth: 0`). Missing
+snapshots or history refs fail with recovery guidance. Use `--vendor-ref` to
+select a particular reviewed snapshot and `--history-ref` to select the history
+being audited; these options do not relax the full-history requirement.
+
 ## Build and check the image
 
 ```sh
@@ -51,6 +66,13 @@ python3 -m unittest discover -s tests/baseline -v
 python3 scripts/audit_image.py litellm-noenterprise:1.106.6
 python3 scripts/smoke_image.py litellm-noenterprise:1.106.6
 ```
+
+The [baseline PR workflow](../.github/workflows/baseline.yml) runs these checks
+on a native Linux AMD64 runner with complete project history. It builds locally
+on the runner and does not publish an image or deploy anything. Its job result
+is the AMD64 validation evidence; the ARM64 results below do not establish AMD64
+compatibility by themselves. No provider credentials or repository secrets are
+needed.
 
 The image uses digest-pinned Python, Node, and uv images, a hash-locked Python
 dependency set, and the upstream npm lock. The dashboard is built from source.
