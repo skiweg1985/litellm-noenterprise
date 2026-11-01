@@ -277,7 +277,7 @@ python3 scripts/test_identity.py litellm-noenterprise:1.106.6
 ```
 
 The OpenRouter browser check requires the pinned Playwright dependencies in
-`tests/e2e` and exercises the public proxy API, named credential resolution, and
+`upstream/litellm/tests/e2e/ui` and exercises the public proxy API, named credential resolution, and
 PNG/JPEG rendering with a controlled provider fixture.
 
 Extension checks run installed code with synthetic accounts and local mock
