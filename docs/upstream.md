@@ -75,7 +75,10 @@ compatibility by themselves. No provider credentials or repository secrets are
 needed.
 
 The image uses digest-pinned Python, Node, and uv images, a hash-locked Python
-dependency set, and the upstream npm lock. The dashboard is built from source.
+dependency set, and the upstream npm lock. The dashboard is built from source
+with Node 24 and npm 11, satisfying its declared engine requirements. Its
+`.npmrc` is present during `npm ci`, enforcing engine checks and disabling
+dependency lifecycle scripts. No package rebuild exceptions are needed.
 LiteLLM and proxy-extras are built locally with dependency installation disabled,
 so upstream's proxy extra cannot reinstall `litellm-enterprise`. The image uses
 our pure-Python packaging metadata, leaving the optional native Rust extension
