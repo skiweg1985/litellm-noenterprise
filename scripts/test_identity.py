@@ -171,6 +171,7 @@ general_settings:
         )
     if args.oidc_settings:
         value = value.split("  oidc_api:", 1)[0]
+        value += '  mcp_advertised_versions: ["2025-06-18", "2025-11-25", "2026-07-28"]\n'
     if args.response_cache:
         value += "\nlitellm_settings:\n  cache: true\n  cache_params:\n    type: local\n"
     if fnmatch.fnmatch("test_subscription_headers.py", args.test_pattern):

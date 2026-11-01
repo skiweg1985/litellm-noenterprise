@@ -239,6 +239,85 @@ class OIDCSettingsTests(unittest.TestCase):
         observed = httpx.get("http://mcp-upstream:8090/observed", trust_env=False)
         self.assertNotIn("mcp-fixture-access-", observed.text)
 
+    def test_existing_mcp_session_observes_changed_server_policy(self):
+        self.assert_mcp_policy_change(modern=False)
+
+    def test_current_mcp_protocol_observes_changed_server_policy(self):
+        self.assert_mcp_policy_change(modern=True)
+
+    def assert_mcp_policy_change(self, *, modern):
+        from test_api import ProviderAPITests
+        from test_mcp import PersonalMCPTests
+
+        current = self.enabled()
+        flow = PersonalMCPTests()
+        flow.client = httpx.Client(base_url=BASE, trust_env=False)
+        self.addCleanup(flow.client.close)
+        provider = flow.headers(
+            user="settings-session-policy", roles=["access", "mcp-a"]
+        )
+        code, verifier = flow.connect(provider, actor="settings-session-upstream")
+        connected = flow.exchange(provider, code, verifier)
+        self.assertEqual(connected.status_code, 200, connected.text)
+        session = (
+            {
+                **provider,
+                "Accept": "application/json, text/event-stream",
+                "MCP-Protocol-Version": "2026-07-28",
+            }
+            if modern
+            else ProviderAPITests.mcp_initialize(flow, provider)
+        )
+
+        if not modern:
+            self.assertTrue(session["Mcp-Session-Id"])
+
+        def request(method, params=None):
+            params = dict(params or {})
+            headers = dict(session)
+            if modern:
+                headers["MCP-Method"] = method
+                if "name" in params:
+                    headers["MCP-Name"] = params["name"]
+                params["_meta"] = {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                }
+            return ProviderAPITests.mcp_request(flow, headers, method, params)
+
+        listed, listing = request("tools/list")
+        self.assertEqual(listed.status_code, 200, listed.text)
+        self.assertIn(
+            "managed_a-whoami", [tool["name"] for tool in listing["result"]["tools"]]
+        )
+        params = {"name": "managed_a-whoami", "arguments": {}}
+        called, result = request("tools/call", params)
+        self.assertEqual(called.status_code, 200, called.text)
+        self.assertIn("settings-session-upstream", str(result))
+        browser = copy.deepcopy(current["browser"])
+        browser["mcp_access_rules"]["managed_a"] = {
+            "claim": "roles",
+            "any_of": ["denied"],
+        }
+        changed = self.save(current, browser=browser)
+        self.assertEqual(changed.status_code, 200, changed.text)
+        httpx.delete(
+            "http://mcp-upstream:8090/observed", trust_env=False
+        ).raise_for_status()
+        admitted = flow.client.get("/v1/models", headers=provider)
+        self.assertEqual(admitted.status_code, 200, admitted.text)
+        denied, result = request("tools/call", params)
+        self.assertEqual(denied.status_code, 200, denied.text)
+        self.assertTrue(result["result"].get("isError"), denied.text)
+        self.assertIn("not allowed", str(result["result"]["content"]))
+        observed = httpx.get("http://mcp-upstream:8090/observed", trust_env=False)
+        self.assertNotIn("mcp-fixture-access-", observed.text)
+        listed, listing = request("tools/list")
+        self.assertEqual(listed.status_code, 200, listed.text)
+        self.assertNotIn(
+            "managed_a-whoami", [tool["name"] for tool in listing["result"]["tools"]]
+        )
+
     def browser_login(self, user="settings-admin", roles=None):
         httpx.post(
             "http://issuer:8080/control/actor",
