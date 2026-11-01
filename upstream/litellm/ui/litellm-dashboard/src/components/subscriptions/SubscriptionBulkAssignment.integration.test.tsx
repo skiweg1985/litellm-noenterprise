@@ -121,7 +121,7 @@ describe("bulk subscription assignment review", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Save selected models" })).toBeEnabled());
   });
 
-  it("hides cached model details when authorization expires and lets catalog errors retry", async () => {
+  it("hides cached model details when authorization expires", async () => {
     renderWithProviders(<SubscriptionBulkAssignment accessToken="fixture" account="new-account" onClose={vi.fn()} />);
     await screen.findByRole("region", { name: "Model Assistant" });
     vi.mocked(saveBulkAssignments).mockRejectedValue(new ApiError("Forbidden", 403, {}));
@@ -129,5 +129,17 @@ describe("bulk subscription assignment review", () => {
     await screen.findByRole("alert");
     expect(screen.queryByRole("region", { name: "Model Assistant" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save selected models" })).toBeDisabled();
+  });
+
+  it("does not claim compatibility when the catalog fails and offers a fresh review", async () => {
+    vi.mocked(getBulkAssignments)
+      .mockRejectedValueOnce(new ApiError("Catalog unavailable", 503, {}))
+      .mockResolvedValueOnce(plan);
+    renderWithProviders(<SubscriptionBulkAssignment accessToken="fixture" account="new-account" onClose={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("catalog is unavailable");
+    expect(screen.queryByRole("region", { name: "Model Assistant" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save selected models" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh review" }));
+    expect(await screen.findByRole("checkbox", { name: "Select Assistant" })).toBeChecked();
   });
 });
