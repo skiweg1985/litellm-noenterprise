@@ -408,7 +408,7 @@ python3 scripts/test_identity.py litellm-noenterprise:1.106.6 --browser
 python3 scripts/test_identity.py litellm-noenterprise:1.106.6 --browser --browser-admin-disabled
 ```
 
-These runs require free loopback ports 4000, 8080 and 8090. The dedicated browser
+These runs require free loopback ports 4000, 8080, 8090 and 8091. The dedicated browser
 maps fixture hostnames locally; no system DNS configuration changes. On macOS,
 `UI_BROWSER_CHANNEL=chrome` uses installed Chrome. Set `UI_EVIDENCE_DIR` to an
 absolute path outside a disposable checkout to retain sanitized screenshots.
@@ -428,3 +428,26 @@ dashboard directory, run `npm run gen:api -- --personal-mcp` with `LITELLM_PYTHO
 pointing to the installed distribution's Python interpreter. This produces
 `src/lib/http/personal-mcp-schema.d.ts`; do not edit it manually. The scoped export
 keeps unrelated upstream dashboard API bindings unchanged.
+
+### Verify dashboard OIDC setup
+
+The settings profile starts with no file-owned OIDC configuration. It tests
+save-and-enable through public endpoints, real fixture sign-in, scope metadata,
+role and MCP policy changes, conflicting edits, disable/re-enable, credential
+redaction, native recovery, and persistence across restarts. The browser profile
+uses the existing SSO Settings tab on desktop and phone:
+
+```sh
+python3 scripts/test_identity.py litellm-noenterprise:1.106.6 --oidc-settings --proxy-workers 2 --test-pattern test_oidc_settings.py
+python3 scripts/test_identity.py litellm-noenterprise:1.106.6 --oidc-settings --browser --browser-proxy-port 0
+```
+
+The second command uses an available loopback proxy port; fixture ports 8080,
+8090 and 8091 must still be free. It does not change a running instance on port
+4000. The default personal-browser profile above continues to require port 4000.
+The test fixtures and databases are temporary and contain only synthetic data.
+
+Generate the settings client types with `npm run gen:api -- --oidc-settings` from
+the dashboard directory, using `LITELLM_PYTHON` as described above. The generated
+`src/lib/http/oidc-settings-schema.d.ts` comes from the backend settings models;
+do not edit it manually.
