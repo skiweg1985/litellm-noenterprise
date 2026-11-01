@@ -1,43 +1,60 @@
 import { useFormContext, useWatch } from "react-hook-form";
 import { MountedFormField, type MountedFormValues } from "@/components/common_components/MountedFormField";
 import { MultiSelect } from "@/components/shared/MultiSelect";
-import { SubscriptionPicker, subscriptionProblem, useModelSubscriptions } from "./SubscriptionPicker";
+import { subscriptionProblem, useModelSubscriptions } from "./SubscriptionPicker";
+import { SubscriptionAssignmentEditor, type SubscriptionSelection } from "./SubscriptionAssignmentEditor";
 
 export function SubscriptionModelFields({ accessToken }: { accessToken: string | null }) {
   const form = useFormContext<MountedFormValues>();
-  const selectedId = useWatch({ control: form.control, name: "subscription_id" });
+  const legacyId = useWatch({ control: form.control, name: "subscription_id" });
+  const raw = useWatch({ control: form.control, name: "subscription_selection" }) as SubscriptionSelection | undefined;
+  const selection = raw ?? { mode: "fixed", subscription_ids: typeof legacyId === "string" ? [legacyId] : [] };
+  const chosenModels = useWatch({ control: form.control, name: "model" });
   const query = useModelSubscriptions(accessToken);
-  const account = query.isError ? undefined : query.data?.accounts.find((item) => item.subscription_id === selectedId);
-  const models = account?.available_models?.models ?? [];
-  const selectSubscription = (id: string | null) => {
-    form.setValue("subscription_id", id, { shouldDirty: true, shouldValidate: true });
-    form.setValue("model", []);
-    form.setValue("model_mappings", []);
+  const accounts = query.isError ? [] : query.data?.accounts ?? [];
+  const selected = selection.subscription_ids.map((id) => accounts.find((item) => item.subscription_id === id));
+  const compatibleModels = (selected[0]?.available_models?.models ?? []).filter((model) =>
+    selected.every((account) => !subscriptionProblem(account, model.slug)),
+  );
+  const validateSelection = () => {
+    if (query.isError) return "Refresh subscriptions and try again.";
+    if (!selected.length) return "Select at least one subscription.";
+    return selected.map((account) => subscriptionProblem(account)).find(Boolean) ?? true;
   };
   const validateModels = (value: unknown) => {
-    if (!Array.isArray(value) || value.length === 0) return "Select a model available in this subscription.";
+    if (!Array.isArray(value) || value.length === 0) return "Select a model available in every assigned subscription.";
     return (
-      value.every((model) => !subscriptionProblem(account, String(model))) ||
-      "Select a model available in this subscription."
+      value.every((model) => selected.every((account) => !subscriptionProblem(account, String(model)))) ||
+      "Select a model available in every assigned subscription."
     );
+  };
+  const selectSubscription = (next: SubscriptionSelection) => {
+    form.setValue("subscription_selection", next, { shouldDirty: true, shouldValidate: true });
+    form.setValue("subscription_id", next.subscription_ids[0] ?? null);
+    const nextAccounts = next.subscription_ids.map((id) => accounts.find((account) => account.subscription_id === id));
+    if (
+      Array.isArray(chosenModels) &&
+      chosenModels.some((model) => nextAccounts.some((account) => subscriptionProblem(account, String(model))))
+    ) {
+      form.setValue("model", []);
+      form.setValue("model_mappings", []);
+    }
   };
   return (
     <>
       <MountedFormField
-        name="subscription_id"
-        label="ChatGPT subscription"
+        name="subscription_selection"
+        label="ChatGPT subscriptions"
         required
         className="mb-4"
-        rules={{
-          validate: () =>
-            query.isError ? "Refresh subscriptions and try again." : subscriptionProblem(account) ?? true,
-        }}
+        defaultValue={selection}
+        rules={{ validate: validateSelection }}
       >
-        {(control) => (
-          <SubscriptionPicker
-            inputId={control.id}
+        {() => (
+          <SubscriptionAssignmentEditor
             accessToken={accessToken}
-            value={control.value as string | null}
+            value={selection}
+            models={Array.isArray(chosenModels) ? (chosenModels as string[]) : []}
             onChange={selectSubscription}
           />
         )}
@@ -48,13 +65,15 @@ export function SubscriptionModelFields({ accessToken }: { accessToken: string |
             id={control.id}
             placeholder="Select subscription models"
             value={Array.isArray(control.value) ? control.value : []}
-            options={models.map((model) => ({ value: `chatgpt/${model.slug}`, label: model.name || model.slug }))}
-            disabled={Boolean(subscriptionProblem(account))}
+            options={compatibleModels.map((model) => ({
+              value: `chatgpt/${model.slug}`,
+              label: model.name || model.slug,
+            }))}
+            disabled={validateSelection() !== true}
             onValueChange={control.onChange}
           />
         )}
       </MountedFormField>
-      <p className="mt-1 mb-4 text-sm text-muted-foreground">Fixed subscription: requests use only this account.</p>
     </>
   );
 }

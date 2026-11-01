@@ -164,3 +164,22 @@ it("shows a legacy subscription by deployment identity and submits its stable ID
     expect.any(Function),
   );
 });
+
+it("loads and edits reserve order without collapsing the saved assignment to fixed mode", async () => {
+  const { getSubscriptions } = await import("@/lib/http/chatgptSubscriptions");
+  const { testQueryClient } = await import("../../tests/test-utils");
+  testQueryClient.clear();
+  vi.mocked(getSubscriptions).mockResolvedValue({ accounts: [
+    { account: "first", subscription_id: "first", display_name: "Primary", token_valid: true, retired: false, available_models: { models: [{ slug: "example-model", name: "Example" }], missing: [] } },
+    { account: "second", subscription_id: "second", display_name: "Reserve", token_valid: true, retired: false, available_models: { models: [{ slug: "example-model", name: "Example" }], missing: [] } },
+  ], problems: [] } as never);
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  renderForm({ onSubmit,
+    modelInfo: { id: "parent-model", db_model: true, subscription_assignment: { mode: "priority", subscription_ids: ["first", "second"], revision: "saved-revision" } },
+    litellmParams: { model: "chatgpt/example-model", timeout: 20 },
+  });
+  expect(await screen.findByRole("combobox", { name: "Subscription routing mode" })).toHaveTextContent("Preferred subscription with reserves");
+  await userEvent.click(await screen.findByRole("button", { name: "Move Reserve up" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ subscription_selection: { mode: "priority", subscription_ids: ["second", "first"] }, timeout: 20 }), expect.any(Function));
+});

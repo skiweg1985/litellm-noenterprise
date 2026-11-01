@@ -171,9 +171,9 @@ export interface components {
         SubscriptionAssignment: {
             /**
              * Mode
-             * @constant
+             * @enum {string}
              */
-            mode: "fixed";
+            mode: "fixed" | "priority" | "distribution";
             /**
              * Revision
              * @default null
