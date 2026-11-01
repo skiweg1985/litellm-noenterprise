@@ -85,6 +85,11 @@ our pure-Python packaging metadata, leaving the optional native Rust extension
 out. The Prisma client, CLI, and engines are generated at build time. Runtime
 uses an unprivileged user and the cached Prisma CLI.
 
+The project's MIT license is retained at
+`/usr/share/licenses/litellm-noenterprise/LICENSE`; the upstream LiteLLM license
+remains separately at `/usr/share/licenses/litellm/LICENSE`. The image audit
+compares both documents byte for byte with their repository sources.
+
 The image retains Node's complete license and third-party notices plus a
 conservative collection from installed dashboard npm packages. These documents
 are available under `/usr/share/licenses/litellm-noenterprise` and at

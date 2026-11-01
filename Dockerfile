@@ -43,6 +43,7 @@ COPY --from=build /opt/prisma /opt/prisma
 COPY --from=build /app/schema.prisma /app/schema.prisma
 COPY upstream/litellm/LICENSE /usr/share/licenses/litellm/LICENSE
 COPY --from=ui /ui/out/third-party-notices/ /usr/share/licenses/litellm-noenterprise/
+COPY LICENSE /usr/share/licenses/litellm-noenterprise/LICENSE
 ENV PATH=/opt/venv/bin:$PATH PRISMA_BINARY_CACHE_DIR=/opt/prisma PRISMA_USE_GLOBAL_NODE=1 \
     PRISMA_CLI_PATH=/opt/prisma/node_modules/.bin/prisma PRISMA_OFFLINE_MODE=true \
     LITELLM_LOCAL_MODEL_COST_MAP=True LITELLM_TELEMETRY=False PYTHONDONTWRITEBYTECODE=1
