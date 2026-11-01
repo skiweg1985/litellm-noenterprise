@@ -1,5 +1,8 @@
 """Distributed subscription models through native CRUD, inference and log APIs."""
 import concurrent.futures
+import os
+import time
+import unittest
 import uuid
 
 import test_subscription_logs as log_tests
@@ -77,6 +80,49 @@ class SubscriptionDistributionTests(log_tests.SubscriptionLogTests):
         self.assertEqual(stored[0]['model_info']['id'], model_id)
         self.assertEqual(stored[0]['model_info']['subscription_assignment']['mode'], 'distribution')
         self.assertEqual(stored[0]['model_info']['subscription_assignment']['subscription_ids'], [third['subscription_id']])
+
+    def test_distribution_assignment_survives_restart(self):
+        if os.getenv('SUBSCRIPTION_RESTART_PHASE') != 'read':
+            first, _ = self.connect('PersistentDistributionFirst')
+            second, _ = self.connect('PersistentDistributionSecond')
+            name, created = self.create_distribution([first, second])
+            self.assertEqual(created.status_code, 200, created.text)
+            model_id = created.json()['model_id']
+            persistent_name = 'distribution-restart-' + first['subscription_id']
+            updated = self.client.patch('/model/' + model_id + '/update', json={'model_name': persistent_name})
+            self.assertEqual(updated.status_code, 200, updated.text)
+            self.burst(persistent_name, 32, [first['account_id'], second['account_id']])
+            self.wait_logs(persistent_name, 32)
+            self.models.remove(model_id)
+            return
+        stored = [row for row in self.client.get('/v1/model/info').json()['data']
+                  if row['model_name'].startswith('distribution-restart-')]
+        self.assertEqual(len(stored), 1)
+        parent = stored[0]
+        name, model_id = parent['model_name'], parent['model_info']['id']
+        self.models.append(model_id)
+        members = parent['model_info']['subscription_assignment']['subscription_ids']
+        self.assertEqual(parent['model_info']['subscription_assignment']['mode'], 'distribution')
+        accounts = self.client.get('/chatgpt/api/accounts').json()['accounts']
+        selected = [account for account in accounts if account['subscription_id'] in members]
+        self.assertEqual(len(selected), 2)
+        before = self.logs(name, page_size=100)['data']
+        self.assertEqual(len(before), 32)
+        old_attempts = [row['metadata']['subscription_attempts'][0] for row in before]
+        old_ids = {attempt['attempt_id'] for attempt in old_attempts}
+        old_members = {attempt['subscription_id']: attempt['model_id'] for attempt in old_attempts}
+        self.burst(name, 32, [account['account_id'] for account in selected])
+        for _ in range(80):
+            rows = self.logs(name, page_size=100)['data']
+            if len(rows) == 64:
+                break
+            time.sleep(.5)
+        self.assertEqual(len(rows), 64)
+        new_attempts = [row['metadata']['subscription_attempts'][0] for row in rows
+                        if row['metadata']['subscription_attempts'][0]['attempt_id'] not in old_ids]
+        self.assertEqual(len(new_attempts), 32)
+        self.assertEqual({attempt['subscription_id']: attempt['model_id'] for attempt in new_attempts}, old_members)
+        self.assertTrue(all(row['model_id'] == model_id for row in rows))
 
     def test_client_errors_exhausted_capacity_and_cooldown_recovery_are_bounded(self):
         import time
