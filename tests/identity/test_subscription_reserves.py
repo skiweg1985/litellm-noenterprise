@@ -33,6 +33,42 @@ class SubscriptionReserveTests(log_tests.SubscriptionLogTests):
         self.assertEqual(updated.status_code, 200, updated.text)
         return name, model_id
 
+    def test_paused_model_blocks_all_members_and_resumes_on_workers(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        first, first_identity = self.connect("PausedPrimary")
+        second, _ = self.connect("PausedReserve")
+        name, model_id = self.create_reserve([first, second])
+        body = {"model": name, "input": "Pause synthetic"}
+        self.client.post("/v1/responses", json=body).raise_for_status()
+        self.client.post("/model/block", json={"model_id": model_id}).raise_for_status()
+        self.control(clear=True)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            responses = list(
+                pool.map(
+                    lambda _: self.client.post("/v1/responses", json=body), range(16)
+                )
+            )
+        self.assertTrue(
+            all(r.status_code >= 400 for r in responses),
+            [r.status_code for r in responses],
+        )
+        self.assertEqual(self.control()["seen"], [])
+        self.client.post(
+            "/model/unblock", json={"model_id": model_id}
+        ).raise_for_status()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            responses = list(
+                pool.map(
+                    lambda _: self.client.post("/v1/responses", json=body), range(16)
+                )
+            )
+        self.assertTrue(
+            all(r.status_code == 200 for r in responses),
+            [r.text for r in responses if r.status_code != 200],
+        )
+        self.assertEqual(self.control()["seen"], [first_identity] * 16)
+
     def test_outage_moves_to_reserve_and_never_escapes_membership(self):
         first, first_identity = self.connect("OutagePrimary")
         second, second_identity = self.connect("OutageReserve")
