@@ -1,0 +1,49 @@
+name: Baseline image
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: baseline-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline-amd64:
+    name: Linux AMD64 baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      IMAGE: litellm-noenterprise:ci
+    steps:
+      - name: Check out complete project history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Fetch the reviewed vendor snapshot
+        run: git fetch origin refs/heads/vendor/litellm:refs/remotes/origin/vendor/litellm
+      - name: Verify import commands and complete source history
+        run: |
+          python3 -m unittest discover -s tests/baseline -v
+          python3 scripts/audit_source.py --vendor-ref origin/vendor/litellm
+      - name: Verify native AMD64 runner
+        run: |
+          test "$(uname -m)" = x86_64
+          docker version
+      - name: Build the community image
+        run: docker build --platform linux/amd64 --progress plain -t "$IMAGE" .
+      - name: Audit every final image layer and installed packages
+        run: |
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE")" = linux/amd64
+          python3 scripts/audit_image.py "$IMAGE"
+      - name: Exercise the proxy and existing MCP entry points
+        run: python3 scripts/smoke_image.py "$IMAGE"

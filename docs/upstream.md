@@ -67,6 +67,13 @@ python3 scripts/audit_image.py litellm-noenterprise:1.106.6
 python3 scripts/smoke_image.py litellm-noenterprise:1.106.6
 ```
 
+The [baseline PR workflow](../.github/workflows/baseline.yml) runs these checks
+on a native Linux AMD64 runner with complete project history. It builds locally
+on the runner and does not publish an image or deploy anything. Its job result
+is the AMD64 validation evidence; the ARM64 results below do not establish AMD64
+compatibility by themselves. No provider credentials or repository secrets are
+needed.
+
 The image uses digest-pinned Python, Node, and uv images, a hash-locked Python
 dependency set, and the upstream npm lock. The dashboard is built from source.
 LiteLLM and proxy-extras are built locally with dependency installation disabled,
