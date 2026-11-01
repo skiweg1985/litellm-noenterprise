@@ -12,7 +12,6 @@ from . import admin
 from .accounts import Accounts
 from .prtg import login_text, render
 from .service import ModelsService, MonitoringError, UsageService
-from .spend_logs import SubscriptionInModelName
 
 OVERVIEW = "/chatgpt/accounts"
 PREFIX = OVERVIEW + "/{name}/usage"
@@ -37,18 +36,6 @@ def require_key(x_monitoring_key: str = Header(default="")):
         raise HTTPException(401, "Invalid monitoring credentials.")
 
 
-def log_subscriptions():
-    """Name the subscription in the request logs; after LiteLLM's own startup,
-    which sets its callbacks from the config."""
-    try:
-        import litellm
-    except ImportError:
-        return None
-    hook = SubscriptionInModelName()
-    litellm.callbacks.append(hook)
-    return hook
-
-
 def watch_with_server(app, accounts):
     """Run the token watcher only while the server runs, not on a mere import."""
     original = app.router.lifespan_context
@@ -57,7 +44,6 @@ def watch_with_server(app, accounts):
     async def lifespan(application):
         async with original(application) as state:
             task = asyncio.ensure_future(accounts.run())
-            hook = log_subscriptions()
             try:
                 yield state
             finally:
@@ -65,11 +51,6 @@ def watch_with_server(app, accounts):
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
                 await accounts.stop_logins()
-                if hook is not None:
-                    import litellm
-
-                    with contextlib.suppress(ValueError):
-                        litellm.callbacks.remove(hook)
 
     app.router.lifespan_context = lifespan
 

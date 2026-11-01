@@ -17,6 +17,7 @@ parser.add_argument("--browser-admin-disabled", action="store_true")
 parser.add_argument("--reject-missing-master", action="store_true")
 parser.add_argument("--reject-invalid-api", action="store_true")
 parser.add_argument("--test-pattern", default="test*.py")
+parser.add_argument("--response-cache", action="store_true", help="Enable local response caching for cache attribution checks")
 parser.add_argument("--api-scope-name", default="api://litellm-api/access")
 parser.add_argument("--api-token-scope", default="access")
 parser.add_argument("--api-audience", default="litellm-api")
@@ -155,6 +156,8 @@ general_settings:
             "master_key: sk-identity-test-only",
             "master_key: " + json.dumps(args.master_key),
         )
+    if args.response_cache:
+        value += "\nlitellm_settings:\n  cache: true\n  cache_params:\n    type: local\n"
     config.write_text(value)
     if args.reject_missing_master:
         config.write_text(
@@ -319,6 +322,8 @@ general_settings:
             "EXPECTED_TOKEN_TYPE=" + args.api_token_type,
             "-e",
             "EXPECTED_MASTER_KEY=" + args.master_key,
+            "-e",
+            "RESPONSE_CACHE_ENABLED=" + str(args.response_cache).lower(),
             "--entrypoint",
             "python",
             args.image,

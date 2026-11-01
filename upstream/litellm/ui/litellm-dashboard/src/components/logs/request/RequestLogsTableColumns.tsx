@@ -10,6 +10,7 @@ import { copyToClipboard, getSpendString } from "@/utils/dataUtils";
 import { getProviderLogoAndName } from "../../provider_info_helpers";
 import { getBatchIdFromRequestId, getBatchRequestCounts, isBatchCallType } from "../batchLogUtils";
 import type { LogEntry } from "../types";
+import { subscriptionAttributionLabel } from "../subscriptionAttribution";
 import { AGENT_CALL_TYPES, MCP_CALL_TYPES } from "../constants";
 import { AgentBadge, AgentIcon, BatchBadge, LlmBadge, McpBadge, SparkleIcon, WrenchIcon } from "./TypeBadges";
 
@@ -158,6 +159,14 @@ export const getRequestLogsTableColumns = ({
       }
       return <StatusBadge tone={isSuccess ? "success" : "error"} label={isSuccess ? "Success" : "Failure"} />;
     },
+  },
+  {
+    id: "subscription_id",
+    header: "Subscription",
+    size: 180,
+    enableSorting: false,
+    accessorFn: (log) => subscriptionAttributionLabel(log),
+    cell: ({ row }) => <TruncatedText value={subscriptionAttributionLabel(row.original)} />,
   },
   {
     id: "session_id",

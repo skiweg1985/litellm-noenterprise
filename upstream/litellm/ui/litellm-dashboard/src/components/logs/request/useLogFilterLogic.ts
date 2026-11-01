@@ -20,6 +20,7 @@ export interface PaginatedResponse {
 }
 
 export const LOG_FILTER_IDS = {
+  SUBSCRIPTION_ID: "subscription_id",
   TEAM_ID: "team_id",
   SPAN_TYPE: "span_type",
   STATUS: "status",
@@ -39,6 +40,7 @@ export const LOG_FILTER_IDS = {
 } as const;
 
 export const LOG_FILTER_LABELS: Record<string, string> = {
+  [LOG_FILTER_IDS.SUBSCRIPTION_ID]: "Subscription",
   [LOG_FILTER_IDS.TEAM_ID]: "Team ID",
   [LOG_FILTER_IDS.SPAN_TYPE]: "Span Type",
   [LOG_FILTER_IDS.STATUS]: "Status",
@@ -178,6 +180,7 @@ export function useLogFilterLogic({
         page: pagination.pageIndex + 1,
         page_size: pageSize,
         params: {
+          subscription_id: getFilterValue(columnFilters, LOG_FILTER_IDS.SUBSCRIPTION_ID),
           api_key: getFilterValue(columnFilters, LOG_FILTER_IDS.KEY_HASH),
           team_id: getFilterValue(columnFilters, LOG_FILTER_IDS.TEAM_ID),
           request_id: getFilterValue(columnFilters, LOG_FILTER_IDS.REQUEST_ID),
