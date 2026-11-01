@@ -6,15 +6,17 @@ test("an administrator creates and edits a distributed subscription model", asyn
     data: { sub: "distribution-admin", oid: "distribution-admin", roles: ["access", "admin"] },
   });
   await page.goto("/oidc/login");
-  const api = async (path: string, method = "GET", body?: unknown) => page.evaluate(async ({ path, method, body }) => {
+  const api = async (path: string, method = "GET", body?: unknown) => test.step(`${method} ${path}`, () => page.evaluate(async ({ path, method, body }) => {
     const response = await fetch(path, {
       method, headers: { Authorization: "Bearer oidc-browser-session", "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(15000),
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     return { status: response.status, data: await response.json() };
-  }, { path, method, body });
+  }, { path, method, body }));
   const accounts: { account: string; subscription_id: string; display_name: string; identity: string }[] = [];
   let modelId: string | undefined;
+  let journeyFailed = false;
   try {
     for (const suffix of ["A", "B"]) {
       const label = `Distribution ${suffix} ${testInfo.project.name}`;
@@ -61,9 +63,20 @@ test("an administrator creates and edits a distributed subscription model", asyn
     expect(response.status).toBe(200);
     expect((await (await request.get("http://127.0.0.1:8091/control")).json()).seen).toEqual([accounts[1].identity]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({ animations: "disabled", path: testInfo.outputPath("subscription-distribution.png") });
+    await test.step("Capture the distributed model on the current viewport", () =>
+      page.screenshot({ animations: "disabled", timeout: 10000, path: testInfo.outputPath("subscription-distribution.png") }));
+  } catch (error) {
+    journeyFailed = true;
+    throw error;
   } finally {
-    if (modelId) await api("/model/delete", "POST", { id: modelId });
-    for (const account of accounts) await api(`/chatgpt/api/accounts/${account.account}/retire`, "POST");
+    try {
+      if (modelId) expect((await api("/model/delete", "POST", { id: modelId })).status).toBe(200);
+      for (const account of accounts) expect((await api(`/chatgpt/api/accounts/${account.account}/retire`, "POST")).status).toBe(200);
+    } catch (error) {
+      if (!journeyFailed) throw error;
+      // The enclosing runner destroys the isolated fixture containers after failure.
+      // Keep the original journey error when its page is already closed by a timeout.
+      console.warn("Subscription fixture cleanup also failed:", String(error));
+    }
   }
 });
