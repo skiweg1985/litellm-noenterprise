@@ -44,6 +44,23 @@ async def retry_policy(router, model, kwargs):
     return value
 
 
+def cooldown_seconds(router, parent, error):
+    import litellm
+
+    configured = parent.get("model_info", {}).get("cooldown_time")
+    if not isinstance(configured, (int, float)) or configured <= 0:
+        configured = router.cooldown_time or 30
+    headers = litellm.litellm_core_utils.exception_mapping_utils._get_response_headers(
+        original_exception=error
+    )
+    retry_after = (
+        litellm.utils._get_retry_after_from_exception_header(response_headers=headers)
+        if headers
+        else None
+    )
+    return max(configured, retry_after or 0)
+
+
 async def record_failure(router, kwargs, error):
     """Skip failed members for this request; retain native shared cooldown state."""
     logging_obj = kwargs.get("litellm_logging_obj")
@@ -58,29 +75,24 @@ async def record_failure(router, kwargs, error):
     ):
         return False
     code = getattr(error, "status_code", None)
+    from datetime import datetime, timezone
+
+    from litellm.router_utils.cooldown_handlers import is_caller_timeout_408
+
+    started = logging_obj.model_call_details.get(
+        "api_call_start_time"
+    ) or logging_obj.model_call_details.get("start_time")
+    clock_zone = started.tzinfo if isinstance(started, datetime) else timezone.utc
+    if is_caller_timeout_408(
+        logging_obj.model_call_details, code, ended=datetime.now(tz=clock_zone)
+    ):
+        return False
     retryable = code in (401, 403, 408, 429) or (
         isinstance(code, int) and 500 <= code < 600
     )
     if not retryable:
         return False
-    cooldown = selection.parent.get("model_info", {}).get("cooldown_time")
-    if not isinstance(cooldown, (int, float)) or cooldown <= 0:
-        cooldown = router.cooldown_time or 30
-    headers = getattr(getattr(error, "response", None), "headers", None) or getattr(
-        error, "litellm_response_headers", None
-    )
-    if headers:
-        import litellm
-
-        cooldown = max(
-            cooldown,
-            litellm.calculate_retry_after(
-                remaining_retries=0,
-                max_retries=1,
-                response_headers=headers,
-                min_timeout=0,
-            ),
-        )
+    cooldown = cooldown_seconds(router, selection.parent, error)
     router.cooldown_cache.add_deployment_to_cooldown(
         model_id=selection.member_id,
         original_exception=error,

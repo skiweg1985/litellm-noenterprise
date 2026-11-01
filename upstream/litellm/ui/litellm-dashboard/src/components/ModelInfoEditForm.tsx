@@ -1,4 +1,5 @@
 "use client";
+import type { SubscriptionSelection } from "./subscriptions/SubscriptionAssignmentEditor";
 
 import { SubscriptionEditField } from "./subscriptions/SubscriptionEditField";
 import { isChatGPTModel } from "./subscriptions/modelAssignment";
@@ -107,6 +108,7 @@ export interface ModelEditFormValues {
   tags?: string[];
   health_check_model?: string | null;
   subscription_id?: string | null;
+  subscription_selection?: SubscriptionSelection;
   litellm_credential_name?: string | null;
   litellm_extra_params?: string;
   model_info?: string;
@@ -145,6 +147,7 @@ const modelEditShape = {
   tags: z.array(z.string()).optional(),
   health_check_model: z.string().nullish(),
   subscription_id: z.string().nullish(),
+  subscription_selection: z.object({ mode: z.enum(["fixed", "priority", "distribution"]), subscription_ids: z.array(z.string()).min(1).max(16) }).optional(),
   litellm_credential_name: z.string().nullish(),
   litellm_extra_params: textish,
   model_info: textish,
@@ -171,7 +174,7 @@ const buildSchema = (ptuEnabled: boolean, isFieldTouched: (field: TouchedPricing
 
     if (
       isChatGPTModel({ model: values.litellm_model_name, custom_llm_provider: values.custom_llm_provider }) &&
-      !values.subscription_id
+      !values.subscription_id && !values.subscription_selection?.subscription_ids.length
     ) {
       reject("subscription_id", "Select a subscription.");
     }
@@ -268,6 +271,10 @@ export const toModelEditFormValues = (localModelData: any, isWildcardModel: bool
   // antd never mounted this field for a non-wildcard model, so the key must be absent, not null.
   ...(isWildcardModel ? { health_check_model: localModelData.model_info?.health_check_model } : {}),
   subscription_id: localModelData.model_info?.subscription_assignment?.subscription_ids?.[0] ?? null,
+  subscription_selection: localModelData.model_info?.subscription_assignment ? {
+    mode: localModelData.model_info.subscription_assignment.mode,
+    subscription_ids: localModelData.model_info.subscription_assignment.subscription_ids,
+  } : undefined,
   litellm_credential_name: localModelData.litellm_params?.litellm_credential_name ?? null,
   litellm_extra_params: JSON.stringify(
     Object.fromEntries(

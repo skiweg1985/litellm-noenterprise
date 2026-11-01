@@ -12,6 +12,19 @@ from .model_assignment import ASSIGNMENT, SubscriptionAssignment, _params
 MEMBER = "_subscription_member"
 
 
+def capacity_model_id(model_info):
+    """Keep the single configured model's native quotas shared by all members."""
+    member = model_info.get(MEMBER)
+    if member:
+        return member["parent"]["model_info"]["id"]
+    return model_info.get("id")
+
+
+def capacity_deployment(deployment):
+    member = (deployment.get("model_info") or {}).get(MEMBER)
+    return member["parent"] if member else deployment
+
+
 def unavailable(
     message="No assigned subscription is available. Reconnect a subscription or retry after its cooldown.",
 ):
@@ -46,7 +59,14 @@ async def hydrate_missing_parent(router, model):
             Deployment(
                 model_name=row.model_name,
                 litellm_params=LiteLLM_Params(**_params(row.litellm_params)),
-                model_info=ModelInfo(**{**info, "id": row.model_id, "db_model": True}),
+                model_info=ModelInfo(
+                    **{
+                        **info,
+                        "id": row.model_id,
+                        "db_model": True,
+                        "blocked": bool(row.blocked),
+                    }
+                ),
             )
         )
 
@@ -68,7 +88,12 @@ async def current_parent(parent):
     return {
         "model_name": row.model_name,
         "litellm_params": _params(row.litellm_params),
-        "model_info": {**(row.model_info or {}), "id": row.model_id, "db_model": True},
+        "model_info": {
+            **(row.model_info or {}),
+            "id": row.model_id,
+            "db_model": True,
+            "blocked": bool(row.blocked),
+        },
     }
 
 
@@ -98,6 +123,8 @@ async def assert_dispatch_current(logging_obj):
     if not isinstance(selection, Selection):
         return
     parent = await current_parent(selection.parent)
+    if parent["model_info"].get("blocked"):
+        raise unavailable("This model is paused. Resume it before sending requests.")
     assignment = parent["model_info"].get(ASSIGNMENT) or {}
     if assignment.get(
         "revision"
@@ -147,6 +174,15 @@ async def expand_candidates(router, candidates, request_kwargs=None):
         raise unavailable(
             "The assignment changed or its request timeout expired. Retry with the current model configuration."
         )
+    if policy is not None and request_kwargs is not None:
+        remaining = max(0.001, policy.deadline - time.monotonic())
+        for key in ("timeout", "request_timeout", "stream_timeout"):
+            supplied = request_kwargs.get(key)
+            request_kwargs[key] = (
+                min(supplied, remaining)
+                if isinstance(supplied, (int, float)) and supplied > 0
+                else remaining
+            )
     accounts = await asyncio.to_thread(Accounts)
     by_id = {a.status()["subscription_id"]: a for a in accounts}
     logging_obj = (request_kwargs or {}).get("litellm_logging_obj")
@@ -180,6 +216,7 @@ async def expand_candidates(router, candidates, request_kwargs=None):
             "parent": parent,
             "revision": assignment.revision,
             "subscription_id": identifier,
+            "member_id": model_id,
         }
         candidate["litellm_params"].update(
             api_key="chatgpt-account:" + account.name, litellm_credential_name=None
@@ -194,7 +231,13 @@ async def expand_candidates(router, candidates, request_kwargs=None):
     cooldowns = await router.cooldown_cache.async_get_active_cooldowns(
         model_ids=[d["model_info"]["id"] for d in result], parent_otel_span=None
     )
-    blocked = {entry[0] for entry in (cooldowns or [])}
+    # A credential rejection is tied to the token fingerprint above. A newly
+    # authorized generation recovers immediately instead of inheriting that 401.
+    blocked = {
+        entry[0]
+        for entry in (cooldowns or [])
+        if str(entry[1].get("status_code")) not in ("401", "403")
+    }
     result = [d for d in result if d["model_info"]["id"] not in blocked]
     if not result:
         raise unavailable()

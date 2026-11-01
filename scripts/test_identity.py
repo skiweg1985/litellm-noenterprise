@@ -159,6 +159,10 @@ general_settings:
         )
     if args.response_cache:
         value += "\nlitellm_settings:\n  cache: true\n  cache_params:\n    type: local\n"
+    if args.test_pattern == "test_subscription_headers.py":
+        value = value.replace("general_settings:\n", "general_settings:\n  forward_client_headers_to_llm_api: true\n", 1)
+    if args.test_pattern == "test_subscription_capacity.py":
+        value += "\nrouter_settings:\n  enable_pre_call_checks: true\n  optional_pre_call_checks: [enforce_model_rate_limits]\n"
     config.write_text(value)
     if args.reject_missing_master:
         config.write_text(
@@ -320,6 +324,8 @@ general_settings:
             "-e",
             "EXPECTED_API_SCOPE=" + args.api_scope_name,
             "-e",
+            "SUBSCRIPTION_CAPACITY_CHECKS=" + str(args.test_pattern == "test_subscription_capacity.py").lower(),
+            "-e",
             "EXPECTED_TOKEN_SCOPE=" + args.api_token_scope,
             "-e",
             "EXPECTED_API_AUDIENCE=" + args.api_audience,
@@ -346,7 +352,7 @@ general_settings:
         print(result.stderr)
         if result.returncode:
             raise RuntimeError("identity acceptance tests failed")
-        if args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py"):
+        if args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py", "test_subscription_reserves.py", "test_subscription_distribution.py"):
             docker("restart", prefix + "-proxy")
             for _ in range(90):
                 ready = docker(
@@ -367,6 +373,10 @@ general_settings:
                 restart_tests.append("test_mcp.PersonalMCPTests.test_connection_survives_cold_restart")
             if args.test_pattern in ("test*.py", "test_subscription_models.py"):
                 restart_tests.append("test_subscription_models.SubscriptionModelTests.test_assignment_survives_restart")
+            if args.test_pattern in ("test*.py", "test_subscription_reserves.py"):
+                restart_tests.append("test_subscription_reserves.SubscriptionReserveTests.test_reserve_assignment_survives_restart")
+            if args.test_pattern in ("test*.py", "test_subscription_distribution.py"):
+                restart_tests.append("test_subscription_distribution.SubscriptionDistributionTests.test_distribution_assignment_survives_restart")
             for test in restart_tests:
                 persistence = docker(
                     "run", "--rm", "--network", prefix, *mount,
