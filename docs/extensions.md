@@ -67,6 +67,34 @@ requests fail until it is connected again. Multiple deployments cannot share a
 fixed-assignment public name. Changes use the existing database model storage and
 survive proxy restarts.
 
+For reserves, choose **Preferred subscription with reserves** in the native model
+form. Add compatible subscriptions and arrange them in preference order. Each
+model keeps its own assignment; the first eligible subscription handles the
+request. Up to sixteen distinct subscriptions can belong to one model. The model
+remains one editable database record and one public model name.
+
+Rate limits, temporary provider failures and rejected credentials can move a
+request to another assigned subscription, at most once per member. Invalid client
+requests do not consume the remaining reserves. Provider `Retry-After` and the
+model's cooldown are both respected. Rejected credentials stay unavailable until
+renewed; request handling never starts a sign-in. Expired credentials that can be
+refreshed remain eligible. If no member is eligible, reconnect an account or wait
+for its cooldown. Native cooldown sharing between workers uses the configured
+Redis cache; without Redis, cooldown memory remains local to each worker.
+
+The existing stream boundary is preserved. An initial HTTP failure may select a
+reserve before streaming starts. Once lifecycle frames or generated content have
+been forwarded, an interrupted stream ends without appending another account's
+response. Cancellation never starts a reserve request. Chat Completions can buffer
+lifecycle-only frames and return an error before committing its streaming HTTP
+response. Logs record physical attempts, the routing mode, and actual reserve
+switches. Skipped unavailable members do not become attempts.
+
+Selection reads the current saved assignment and checks it again before provider
+dispatch. Membership changes, deletion and rename therefore cannot make a stale
+worker send to a removed member. The public parent ID remains the ordinary model
+log filter; each attempt also records its stable member deployment ID.
+
 Configuration-managed deployments can still use an explicit account alias:
 
 ```yaml
