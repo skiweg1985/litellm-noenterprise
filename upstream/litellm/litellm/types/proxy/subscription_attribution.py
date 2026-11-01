@@ -12,6 +12,7 @@ class SubscriptionAttemptRecord(TypedDict):
     connection_revision: str | None
     model: str | None
     model_id: str | None
+    parent_model_id: NotRequired[str | None]
     started_at: str | None
     ended_at: str | None
     outcome: Literal["success", "failure", "cancelled", "incomplete"]
