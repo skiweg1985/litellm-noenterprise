@@ -71,7 +71,11 @@ For reserves, choose **Preferred subscription with reserves** in the native mode
 form. Add compatible subscriptions and arrange them in preference order. Each
 model keeps its own assignment; the first eligible subscription handles the
 request. Up to sixteen distinct subscriptions can belong to one model. The model
-remains one editable database record and one public model name.
+remains one editable database record and one public model name. Native model
+RPM/TPM limits, when enforcement is enabled, and the model concurrency limit remain
+shared across its members. Adding subscriptions does not multiply those limits.
+Pause and resume apply to the whole model on every worker. Native cache and
+process-local semaphore semantics remain unchanged.
 
 Rate limits, temporary provider failures and rejected credentials can move a
 request to another assigned subscription, at most once per member. Invalid client

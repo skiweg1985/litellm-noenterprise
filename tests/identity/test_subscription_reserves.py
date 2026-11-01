@@ -259,6 +259,33 @@ class SubscriptionReserveTests(log_tests.SubscriptionLogTests):
                 self.assertFalse(attempts[0]["reserve_switch"])
                 self.control(stream_error=False, delay=0)
 
+    def test_stream_http_failure_can_switch_before_any_output(self):
+        first, first_identity = self.connect("PreStreamPrimary")
+        second, second_identity = self.connect("PreStreamReserve")
+        for surface in ("responses", "chat/completions"):
+            name, _ = self.create_reserve([first, second])
+            self.control(status_by_identity={first_identity: 503}, clear=True)
+            body = {"model": name, "stream": True}
+            body.update(
+                {"input": "Before streaming synthetic"}
+                if surface == "responses"
+                else {
+                    "messages": [
+                        {"role": "user", "content": "Before streaming synthetic"}
+                    ]
+                }
+            )
+            with self.client.stream("POST", "/v1/" + surface, json=body) as response:
+                self.assertEqual(response.status_code, 200)
+                delivered = "\n".join(response.iter_lines())
+            self.assertIn("ok", delivered)
+            self.assertEqual(self.control()["seen"], [first_identity, second_identity])
+            attempts = self.wait_logs(name)["data"][0]["metadata"][
+                "subscription_attempts"
+            ]
+            self.assertEqual([a["outcome"] for a in attempts], ["failure", "success"])
+            self.assertEqual([a["reserve_switch"] for a in attempts], [False, True])
+
     def test_caller_timeout_does_not_cool_down_or_consume_reserves(self):
         first, first_identity = self.connect("TimeoutPrimary")
         second, _ = self.connect("TimeoutReserve")
