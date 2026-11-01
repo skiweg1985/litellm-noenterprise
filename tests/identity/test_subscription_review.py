@@ -103,6 +103,12 @@ class SubscriptionReviewTests(model_tests.SubscriptionModelTests):
             [member["state"] for member in status["members"]], ["cooldown", "cooldown"]
         )
         self.assertTrue(all(member["retry_at"] for member in status["members"]))
+        self.control(status_by_identity={}, clear=True)
+        blocked = self.client.post(
+            "/v1/responses", json={"model": name, "input": "Still cooling"}
+        )
+        self.assertEqual(blocked.status_code, 503, blocked.text)
+        self.assertEqual(self.control()["seen"], [])
         other = self.client.get(
             "/chatgpt/api/models/" + sibling.json()["model_id"] + "/availability"
         ).json()
@@ -115,10 +121,21 @@ class SubscriptionReviewTests(model_tests.SubscriptionModelTests):
         self.assertEqual(self.client.get(path).json()["state"], "paused")
         self.control(status_by_identity={})
 
-    def test_fixed_model_status_includes_native_credential_cooldown(self):
+    def test_fixed_status_does_not_infer_cooldown_from_provider_error(self):
         account, identity = self.connect("ReviewFixedRejected")
         name, created = self.create(account)
         model_id = created.json()["model_id"]
+        # An HTTP error alone does not prove routing exclusion. Configure a
+        # zero cooldown and observe the next real request as positive control.
+        self.client.patch(
+            "/model/" + model_id + "/update",
+            json={
+                "model_info": {
+                    "allowed_fails_policy": {"AuthenticationErrorAllowedFails": 0},
+                    "cooldown_time": 0,
+                }
+            },
+        ).raise_for_status()
         self.control(status_by_identity={identity: 401})
         failed = self.client.post(
             "/v1/responses", json={"model": name, "input": "Fixed rejection"}
@@ -127,9 +144,14 @@ class SubscriptionReviewTests(model_tests.SubscriptionModelTests):
         status = self.client.get(
             "/chatgpt/api/models/" + model_id + "/availability"
         ).json()
-        self.assertEqual(status["state"], "unavailable", status)
-        self.assertEqual(status["members"][0]["state"], "cooldown", status)
-        self.control(status_by_identity={})
+        self.assertEqual(status["state"], "eligible", status)
+        self.assertEqual(status["members"][0]["state"], "eligible", status)
+        self.control(status_by_identity={}, clear=True)
+        recovered = self.client.post(
+            "/v1/responses", json={"model": name, "input": "Provider recovered"}
+        )
+        self.assertEqual(recovered.status_code, 200, recovered.text)
+        self.assertEqual(self.control()["seen"], [identity])
 
 
 for _name in tuple(model_tests.SubscriptionModelTests.__dict__):
