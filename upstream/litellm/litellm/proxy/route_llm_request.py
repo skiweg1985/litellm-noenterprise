@@ -58,12 +58,21 @@ def _is_a2a_agent_model(model_name: object) -> bool:
     return isinstance(model_name, str) and model_name.startswith("a2a/")
 
 
-def _raise_if_model_fully_blocked(llm_router: LitellmRouter, model_name: object, team_id: str | None) -> None:
+async def _raise_if_model_fully_blocked(llm_router: LitellmRouter, model_name: object, team_id: str | None) -> None:
     if not isinstance(model_name, str) or not model_name:
         return
     if not isinstance(llm_router, litellm.Router):
         return
-    deployments: Final = llm_router.get_model_list(model_name=model_name, team_id=team_id) or []
+    deployments = llm_router.get_model_list(model_name=model_name, team_id=team_id) or []
+    from litellm.proxy.extensions.chatgpt_subscriptions.expansion import current_parent
+    from litellm.proxy.extensions.chatgpt_subscriptions.model_assignment import ASSIGNMENT
+
+    # Managed parents use the authoritative flag even on a worker whose native
+    # model cache predates the most recent pause or resume operation.
+    deployments = [
+        await current_parent(d) if (d.get("model_info") or {}).get(ASSIGNMENT) else d
+        for d in deployments
+    ]
     if llm_router.are_all_deployments_blocked(deployments):
         raise litellm.PermissionDeniedError(
             message="Model is blocked",
@@ -690,7 +699,7 @@ async def _route_request_single_attempt(  # noqa: ANN202  # returns unawaited pr
         else:
             return getattr(litellm, f"{route_type}")(**data)
     elif llm_router is not None:
-        _raise_if_model_fully_blocked(llm_router=llm_router, model_name=data.get("model"), team_id=team_id)
+        await _raise_if_model_fully_blocked(llm_router=llm_router, model_name=data.get("model"), team_id=team_id)
         # Evals API: always route to litellm directly (not through router)
         # But extract model credentials if a model is provided
         if route_type in [

@@ -12,6 +12,19 @@ from .model_assignment import ASSIGNMENT, SubscriptionAssignment, _params
 MEMBER = "_subscription_member"
 
 
+def capacity_model_id(model_info):
+    """Keep the single configured model's native quotas shared by all members."""
+    member = model_info.get(MEMBER)
+    if member:
+        return member["parent"]["model_info"]["id"]
+    return model_info.get("id")
+
+
+def capacity_deployment(deployment):
+    member = (deployment.get("model_info") or {}).get(MEMBER)
+    return member["parent"] if member else deployment
+
+
 def unavailable(
     message="No assigned subscription is available. Reconnect a subscription or retry after its cooldown.",
 ):
@@ -46,7 +59,14 @@ async def hydrate_missing_parent(router, model):
             Deployment(
                 model_name=row.model_name,
                 litellm_params=LiteLLM_Params(**_params(row.litellm_params)),
-                model_info=ModelInfo(**{**info, "id": row.model_id, "db_model": True}),
+                model_info=ModelInfo(
+                    **{
+                        **info,
+                        "id": row.model_id,
+                        "db_model": True,
+                        "blocked": bool(row.blocked),
+                    }
+                ),
             )
         )
 
@@ -68,7 +88,12 @@ async def current_parent(parent):
     return {
         "model_name": row.model_name,
         "litellm_params": _params(row.litellm_params),
-        "model_info": {**(row.model_info or {}), "id": row.model_id, "db_model": True},
+        "model_info": {
+            **(row.model_info or {}),
+            "id": row.model_id,
+            "db_model": True,
+            "blocked": bool(row.blocked),
+        },
     }
 
 
@@ -98,6 +123,8 @@ async def assert_dispatch_current(logging_obj):
     if not isinstance(selection, Selection):
         return
     parent = await current_parent(selection.parent)
+    if parent["model_info"].get("blocked"):
+        raise unavailable("This model is paused. Resume it before sending requests.")
     assignment = parent["model_info"].get(ASSIGNMENT) or {}
     if assignment.get(
         "revision"

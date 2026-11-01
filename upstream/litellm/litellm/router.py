@@ -8451,14 +8451,16 @@ class Router:
                 return
             model_group: Final = metadata.get("model_group", None)
             model_info: Final = litellm_params.get("model_info", {}) or {}
-            deployment_id: Final = model_info.get("id", None)
+            from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_model_id
+
+            deployment_id: Final = capacity_model_id(model_info)
             if model_group is None or deployment_id is None or self.get_deployment(model_id=str(deployment_id)) is None:
                 return
 
             # Always track deployment successes for cooldown logic, regardless of TPM/RPM limits
             increment_deployment_successes_for_current_minute(
                 litellm_router_instance=self,
-                deployment_id=str(deployment_id),
+                deployment_id=str(model_info.get("id", deployment_id)),
             )
 
             total_tokens: Final[float] = standard_logging_object.get("total_tokens", 0)
@@ -8491,7 +8493,9 @@ class Router:
             if deployment_metadata is None or not isinstance(model_group, str):
                 return
             model_info: Final = deployment_metadata["model_info"]
-            deployment_id: Final = model_info.get("id") if isinstance(model_info, dict) else None
+            from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_model_id
+
+            deployment_id: Final = capacity_model_id(model_info) if isinstance(model_info, dict) else None
             if deployment_id is None:
                 return
             total_tokens: Final = response_total_token_count(response)
@@ -8737,7 +8741,9 @@ class Router:
         )  # handles wildcard routes - by giving the original name sent to `litellm.completion`
         model_group: Final = kwargs["litellm_params"]["metadata"].get("model_group", None)
         model_info: Final = kwargs["litellm_params"].get("model_info", {}) or {}
-        id = model_info.get("id", None)
+        from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_model_id
+
+        id = capacity_model_id(model_info)
         if model_group is None or id is None:
             return
         elif isinstance(id, int):
@@ -9057,6 +9063,9 @@ class Router:
         Raises:
         - Rate Limit Exception - If the deployment is over it's tpm/rpm limits
         """
+        from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_deployment
+
+        deployment = capacity_deployment(deployment)
         for _callback in litellm.callbacks:
             if isinstance(_callback, CustomLogger):
                 _callback.pre_call_check(deployment)
@@ -9078,6 +9087,9 @@ class Router:
         Raises:
         - Rate Limit Exception - If the deployment is over it's tpm/rpm limits
         """
+        from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_deployment
+
+        deployment = capacity_deployment(deployment)
         for _callback in litellm.callbacks:
             if isinstance(_callback, CustomLogger):
                 try:
@@ -12801,6 +12813,10 @@ class Router:
         Returns:
             The appropriate client based on the given client_type and kwargs.
         """
+        if client_type == "max_parallel_requests":
+            from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_deployment
+
+            deployment = capacity_deployment(deployment)
         model_id: Final = deployment["model_info"]["id"]
         parent_otel_span: Final[Span | None] = get_parent_otel_span_from_kwargs(kwargs)
         if client_type == "max_parallel_requests":
@@ -13029,7 +13045,9 @@ class Router:
             except Exception as e:
                 verbose_router_logger.exception("An error occurs - %s", e)
 
-            model_id = _model_info.get("id", "")
+            from litellm.proxy.extensions.chatgpt_subscriptions.expansion import capacity_model_id
+
+            model_id = capacity_model_id(_model_info) or ""
             ## RPM CHECK ##
             ### get local router cache ###
             current_request_cache_local = (
