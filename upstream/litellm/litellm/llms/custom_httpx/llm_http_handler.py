@@ -2639,7 +2639,11 @@ class BaseLLMHTTPHandler:
         )
 
         if extra_headers:
-            headers.update(extra_headers)
+            if custom_llm_provider == "chatgpt":
+                from litellm.llms.chatgpt.common_utils import merge_subscription_headers
+                headers = merge_subscription_headers(headers, extra_headers)
+            else:
+                headers.update(extra_headers)
 
         # Check if streaming is requested
         stream = response_api_optional_request_params.get("stream", False)
@@ -2851,7 +2855,11 @@ class BaseLLMHTTPHandler:
         )
 
         if extra_headers:
-            headers.update(extra_headers)
+            if custom_llm_provider == "chatgpt":
+                from litellm.llms.chatgpt.common_utils import merge_subscription_headers
+                headers = merge_subscription_headers(headers, extra_headers)
+            else:
+                headers.update(extra_headers)
 
         # Check if streaming is requested
         stream = response_api_optional_request_params.get("stream", False)
