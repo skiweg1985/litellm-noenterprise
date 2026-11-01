@@ -20,6 +20,12 @@ def fixed_subscription_group(router, model):
 
 def pin_subscription_credentials(deployment, kwargs):
     """A caller cannot replace a managed model's administrator-selected account."""
+    # Preserve the router's stable deployment ID before native client-side
+    # credential handling/nested Responses calls derive temporary model IDs.
+    logging_obj = kwargs.get('litellm_logging_obj')
+    from litellm.litellm_core_utils.litellm_logging import Logging
+    if isinstance(logging_obj, Logging):
+        logging_obj._chatgpt_subscription_deployment_id = (deployment.get('model_info') or {}).get('id')
     assignment = (deployment.get('model_info') or {}).get(ASSIGNMENT)
     if not assignment:
         return

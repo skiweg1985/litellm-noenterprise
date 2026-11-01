@@ -69,7 +69,9 @@ def begin(logging_obj, credential, model):
     details = logging_obj.model_call_details
     params = details.get("litellm_params") or {}
     metadata = params.get("litellm_metadata") or params.get("metadata") or {}
-    model_id = (metadata.get("model_info") or {}).get("id")
+    model_id = getattr(logging_obj, "_chatgpt_subscription_deployment_id", None)
+    if not isinstance(model_id, str):
+        model_id = (metadata.get("model_info") or {}).get("id")
     previous = state.attempts[-1].value if state.attempts else None
     reason = (
         "initial"
