@@ -7548,13 +7548,8 @@ export const deleteToolPolicyOverride = async (
 
 // ── MCP OAuth user-credential helpers ────────────────────────────────────────
 
-export interface MCPOAuthUserCredentialStatus {
-  server_id: string;
-  has_credential: boolean;
-  expires_at?: string | null;
-  is_expired: boolean;
-  connected_at?: string | null;
-}
+export type MCPOAuthUserCredentialStatus =
+  import("@/lib/http/personal-mcp-schema").components["schemas"]["MCPOAuthUserCredentialStatus"];
 
 export interface MCPUserCredentialListItem {
   server_id: string;
@@ -7645,7 +7640,7 @@ export const getMCPOAuthUserCredentialStatus = async (
     headers: { [globalLitellmHeaderName]: `Bearer ${accessToken}` },
   });
   if (!response.ok) {
-    return { server_id: serverId, has_credential: false, is_expired: false };
+    throw new Error("Could not check this connection. Refresh or sign in again.");
   }
   return response.json();
 };

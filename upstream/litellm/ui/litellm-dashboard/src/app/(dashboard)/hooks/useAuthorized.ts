@@ -6,6 +6,9 @@ import { checkTokenValidity, decodeToken } from "@/utils/jwtUtils";
 import { buildLoginUrlWithReturn, getLoginUrl, storeReturnUrl } from "@/utils/returnUrlUtils";
 import { useCallback, useEffect, useMemo } from "react";
 import { effectiveSessionRole, formatUserRole, isViewOnlySessionRole } from "@/utils/roles";
+import { usePathname } from "next/navigation";
+import { uiHref } from "@/utils/uiHref";
+import { useOidcSession } from "@/hooks/useOidcSession";
 import { useUIConfig } from "./uiConfig/useUIConfig";
 
 const useAuthorized = () => {
@@ -15,8 +18,15 @@ const useAuthorized = () => {
 
   const decoded = useMemo(() => decodeToken(token), [token]);
   const isTokenValid = useMemo(() => checkTokenValidity(token), [token]);
-  const isLoading = isUIConfigLoading;
-  const isAuthorized = isTokenValid && !uiConfig?.admin_ui_disabled;
+  const pathname = usePathname();
+  const personalPage = pathname?.replace(/\/+$/, "") === uiHref("connect").replace(/\/+$/, "");
+  const session = useOidcSession(decoded?.key ?? null, decoded?.user_id);
+  const isLoading = isUIConfigLoading || (session.enabled && session.isPending);
+  const isAuthorized =
+    isTokenValid &&
+    (session.enabled
+      ? !!session.data && !session.isError && (!uiConfig?.admin_ui_disabled || personalPage)
+      : !uiConfig?.admin_ui_disabled);
 
   // Helper function to redirect to login while preserving the current URL
   const redirectToLogin = useCallback(() => {
@@ -41,6 +51,8 @@ const useAuthorized = () => {
   return {
     isLoading,
     isAuthorized,
+    isOidcSession: session.enabled,
+    adminAccess: session.data?.admin_access ?? false,
     token: isAuthorized ? token : null,
     accessToken: decoded?.key ?? null,
     userId: decoded?.user_id ?? null,

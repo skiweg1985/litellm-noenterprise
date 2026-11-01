@@ -14,12 +14,13 @@ a complete flow works without enterprise dependencies.
 | API authentication | Existing custom-auth extension point | It replaces authentication rather than falling back automatically to API keys; preserve unrelated API-key behavior explicitly. |
 | JWT configuration | Existing JWT authentication facilities | Enterprise gates exist; do not globally enable premium mode. |
 
-The image smoke check verifies that the rebuilt `/ui/connect/` page is served,
-that personal OAuth routes are registered, and that anonymous credential access
-is denied. It does **not** prove successful non-administrator connection
-management: that requires a configured identity, database, and controlled MCP
-provider in the subsequent implementation tickets. Those tickets must evaluate
-the existing flow before changing UI behavior.
+The image smoke check verifies rebuilt `/ui/connect/` assets, registered OAuth
+routes and anonymous credential denial. The independent browser suite exercises
+the same page with the configured identity/database and controlled MCP provider.
+The retained components are `ConnectFlowSurface`, `MCPAppsPanel` and
+`useUserMcpOAuthFlow`; changes add session gating, truthful connection states,
+server-side managed token exchange, accessible controls and phone layouts.
+See [personal connection usage and checks](identity.md#manage-personal-connections).
 
 ## Test reuse
 

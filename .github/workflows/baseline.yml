@@ -53,3 +53,11 @@ jobs:
           python3 scripts/test_identity.py "$IMAGE" --reject-missing-master
           python3 scripts/test_identity.py "$IMAGE" --test-pattern test_scope_profile.py --api-scope-name https://api.example.test/invoke --api-token-scope invoke --api-audience litellm-test --api-token-type at+jwt --master-key fixture.master.with-dots-and-sufficient-length
           python3 scripts/test_identity.py "$IMAGE" --api-audience litellm-test --reject-invalid-api
+      - name: Install pinned browser test dependencies
+        run: |
+          npm ci --prefix upstream/litellm/tests/e2e/ui --ignore-scripts --no-audit --no-fund
+          upstream/litellm/tests/e2e/ui/node_modules/.bin/playwright install --with-deps chromium
+      - name: Exercise personal connections in desktop and phone browsers
+        run: |
+          python3 scripts/test_identity.py "$IMAGE" --browser
+          python3 scripts/test_identity.py "$IMAGE" --browser --browser-admin-disabled

@@ -18,7 +18,10 @@ import { fileURLToPath } from "node:url";
 
 const dashboardDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(dashboardDir, "..", "..");
-const outPath = join(dashboardDir, "src", "lib", "http", "schema.d.ts");
+// A scoped model export avoids changing unrelated upstream API bindings when
+// only the personal connection contract is consumed by this distribution.
+const personalMcp = process.argv.includes("--personal-mcp");
+const outPath = join(dashboardDir, "src", "lib", "http", personalMcp ? "personal-mcp-schema.d.ts" : "schema.d.ts");
 const specDir = mkdtempSync(join(tmpdir(), "litellm-openapi-"));
 const specPath = join(specDir, "openapi.json");
 
@@ -31,22 +34,29 @@ const python = (process.env.LITELLM_PYTHON ?? "python3").split(" ");
 // depending on the interpreter — enough to make this output non-reproducible
 // across CI and contributors. inspect.cleandoc normalizes every description to one
 // canonical form regardless of interpreter, so the generated file is stable.
-const dumpSpec = [
-  "import inspect, json, sys",
-  "from litellm.proxy.proxy_server import app",
-  "from fastapi.routing import APIRoute",
-  "for route in app.routes:",
-  "    if isinstance(route, APIRoute):",
-  "        route.include_in_schema = True",
-  "app.openapi_schema = None",
-  "def normalize(node):",
-  "    if isinstance(node, dict):",
-  "        return {k: inspect.cleandoc(v) if k == 'description' and isinstance(v, str) else normalize(v) for k, v in node.items()}",
-  "    if isinstance(node, list):",
-  "        return [normalize(v) for v in node]",
-  "    return node",
-  "with open(sys.argv[1], 'w') as f: json.dump(normalize(app.openapi()), f, sort_keys=True)",
-].join("\n");
+const dumpSpec = personalMcp
+  ? [
+      "import json, sys",
+      "from litellm.proxy._types import MCPOAuthUserCredentialStatus",
+      "spec = {'openapi': '3.1.0', 'info': {'title': 'Personal MCP connection status', 'version': '1'}, 'paths': {}, 'components': {'schemas': {'MCPOAuthUserCredentialStatus': MCPOAuthUserCredentialStatus.model_json_schema()}}}",
+      "with open(sys.argv[1], 'w') as f: json.dump(spec, f, sort_keys=True)",
+    ].join("\n")
+  : [
+      "import inspect, json, sys",
+      "from litellm.proxy.proxy_server import app",
+      "from fastapi.routing import APIRoute",
+      "for route in app.routes:",
+      "    if isinstance(route, APIRoute):",
+      "        route.include_in_schema = True",
+      "app.openapi_schema = None",
+      "def normalize(node):",
+      "    if isinstance(node, dict):",
+      "        return {k: inspect.cleandoc(v) if k == 'description' and isinstance(v, str) else normalize(v) for k, v in node.items()}",
+      "    if isinstance(node, list):",
+      "        return [normalize(v) for v in node]",
+      "    return node",
+      "with open(sys.argv[1], 'w') as f: json.dump(normalize(app.openapi()), f, sort_keys=True)",
+    ].join("\n");
 
 try {
   execFileSync(python[0], [...python.slice(1), "-c", dumpSpec, specPath], {

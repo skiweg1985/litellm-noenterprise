@@ -3,11 +3,21 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, ArrowLeft, ChevronRight, Wrench, CheckCircle, Loader2 } from "lucide-react";
+import { OIDC_BROWSER_MARKER } from "@/hooks/useOidcSession";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  MCPOAuthUserCredentialStatus,
   deleteMCPOAuthUserCredential,
   fetchMCPServers,
   getMCPOAuthUserCredentialStatus,
@@ -31,6 +41,7 @@ interface OAuth2ConnectButtonProps {
   onConnect: (serverId: string) => void;
   variant?: "badge" | "button";
   autoStartKey?: string | null;
+  label?: string;
 }
 
 export const OAuth2ConnectButton: React.FC<OAuth2ConnectButtonProps> = ({
@@ -39,6 +50,7 @@ export const OAuth2ConnectButton: React.FC<OAuth2ConnectButtonProps> = ({
   onConnect,
   variant = "badge",
   autoStartKey = null,
+  label = "Connect",
 }) => {
   const name = server.server_name ?? server.alias ?? server.server_id;
   const { startOAuthFlow, status } = useUserMcpOAuthFlow({
@@ -60,25 +72,22 @@ export const OAuth2ConnectButton: React.FC<OAuth2ConnectButtonProps> = ({
     return (
       <Button onClick={startOAuthFlow} disabled={loading} className="font-semibold h-[38px] min-w-[110px]">
         {loading && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
-        {loading ? "Connecting\u2026" : "Connect"}
+        {loading ? "Connecting\u2026" : label}
       </Button>
     );
   }
 
   return (
-    <span
+    <Button
+      size="sm"
+      disabled={loading}
       onClick={(e) => {
         e.stopPropagation();
         if (!loading) startOAuthFlow();
       }}
-      className={`text-[11px] font-semibold rounded-md px-2 py-0.5 shrink-0 whitespace-nowrap ${
-        loading
-          ? "text-muted-foreground bg-muted cursor-default"
-          : "text-primary-foreground bg-primary cursor-pointer hover:bg-primary/90"
-      }`}
     >
-      {loading ? "Connecting\u2026" : "Connect"}
-    </span>
+      {loading ? "Connecting…" : label}
+    </Button>
   );
 };
 
@@ -113,6 +122,14 @@ type TabKey = "all" | "connected";
 const TOOLS_FETCH_CONCURRENCY = 5;
 
 const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange, connectMode }) => {
+  const personal = accessToken === OIDC_BROWSER_MARKER;
+  const [connectionStates, setConnectionStates] = useState<Record<string, MCPOAuthUserCredentialStatus>>({});
+  const [connectionErrors, setConnectionErrors] = useState<Record<string, boolean>>({});
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [disconnectError, setDisconnectError] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [revision, setRevision] = useState(0);
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -178,11 +195,15 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
       try {
         const status = await getMCPOAuthUserCredentialStatus(accessToken, server.server_id);
         if (!isCurrentLoad()) return;
-        if (status.has_credential && !status.is_expired) {
+        setConnectionStates((prev) => ({ ...prev, [server.server_id]: status }));
+        if (
+          status.connection_status === "connected" ||
+          (!status.connection_status && status.has_credential && !status.is_expired)
+        ) {
           setOauthConnected((prev) => new Set(prev).add(server.server_id));
         }
       } catch {
-        // ignore
+        if (isCurrentLoad()) setConnectionErrors((prev) => ({ ...prev, [server.server_id]: true }));
       } finally {
         if (isCurrentLoad()) {
           setOauthChecking((prev) => {
@@ -199,19 +220,22 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
   useEffect(() => {
     let current = true;
     const isCurrentLoad = () => current;
-
     fetchMCPServers(accessToken, undefined, connectMode)
       .then(async (serverData) => {
         if (!isCurrentLoad()) return;
         const list: MCPServer[] = Array.isArray(serverData) ? serverData : serverData?.data ?? [];
         const reachable = connectMode ? list.filter((s) => s.connected_app_reachable !== false) : list;
         const oauthServers = reachable.filter((s) => getMcpOAuthMode(s) === "authorization_code");
+        setConnectionStates({});
+        setConnectionErrors({});
+        setOauthConnected(new Set());
+        setLoadError(false);
         commitServers(reachable);
         setOauthChecking(new Set(oauthServers.map((s) => s.server_id)));
         setLoading(false);
 
         oauthServers.forEach((s) => checkOauthCredential(s, isCurrentLoad));
-
+        if (personal) return;
         setLoadingCounts(true);
         const chunks = Array.from({ length: Math.ceil(reachable.length / TOOLS_FETCH_CONCURRENCY) }, (_, i) =>
           reachable.slice(i * TOOLS_FETCH_CONCURRENCY, (i + 1) * TOOLS_FETCH_CONCURRENCY),
@@ -225,13 +249,14 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
       .catch(() => {
         if (isCurrentLoad()) {
           commitServers([]);
+          setLoadError(true);
           setLoading(false);
         }
       });
     return () => {
       current = false;
     };
-  }, [accessToken, connectMode, commitServers, fetchToolCount, checkOauthCredential]);
+  }, [accessToken, connectMode, commitServers, fetchToolCount, checkOauthCredential, personal, revision]);
 
   useEffect(() => {
     if (oauthConnected.size === 0) return;
@@ -292,9 +317,16 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
     if (getMcpOAuthMode(server) === "m2m") {
       return <CheckCircle className="h-3.5 w-3.5 text-success shrink-0" />;
     }
+    if (personal && server.auth_type === "oauth_delegate") {
+      return <span className="text-xs text-muted-foreground">Use your client</span>;
+    }
     if (getMcpOAuthMode(server) === "authorization_code") {
+      const state = connectionStates[server.server_id]?.connection_status;
+      if (connectionErrors[server.server_id])
+        return <span className="text-xs text-destructive">Status unavailable</span>;
+      if (state === "unavailable") return <span className="text-xs text-muted-foreground">Setup needed</span>;
       if (oauthConnected.has(server.server_id)) {
-        return <CheckCircle className="h-3.5 w-3.5 text-success shrink-0" />;
+        return <span className="text-xs text-emerald-600 dark:text-emerald-400">Connected</span>;
       }
       if (oauthChecking.has(server.server_id)) {
         return <Skeleton className="h-6 w-16 shrink-0 rounded-md" />;
@@ -303,7 +335,8 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
         <OAuth2ConnectButton
           server={server}
           accessToken={accessToken}
-          onConnect={(id) => setOauthConnected((prev) => new Set(prev).add(id))}
+          onConnect={() => setRevision((prev) => prev + 1)}
+          label={state === "reconnect_required" ? "Reconnect" : "Connect"}
           variant="badge"
         />
       );
@@ -315,9 +348,9 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
   };
 
   const { data: detailToolsResult, isLoading: loadingTools } = useQuery({
-    queryKey: ["mcp-apps-panel-detail-tools", detailServer?.server_id],
+    queryKey: ["mcp-apps-panel-detail-tools", accessToken, detailServer?.server_id, revision],
     queryFn: () => listMCPTools(accessToken, detailServer!.server_id),
-    enabled: !!detailServer,
+    enabled: !!detailServer && !personal,
   });
   const detailTools: MCPTool[] = Array.isArray(detailToolsResult?.tools) ? detailToolsResult.tools : [];
 
@@ -328,16 +361,22 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
       name.toLowerCase().includes(query.toLowerCase()) ||
       (s.description ?? "").toLowerCase().includes(query.toLowerCase());
     const matchesTab =
-      activeTab === "all" || (selectedServers.includes(name) && connectUnavailabilityLabel(s) === null);
+      activeTab === "all" ||
+      ((personal ? oauthConnected.has(s.server_id) : selectedServers.includes(name)) &&
+        connectUnavailabilityLabel(s) === null);
     return matchesQuery && matchesTab;
   });
 
   const connectedCount = servers.filter(
-    (s) => selectedServers.includes(nameOf(s)) && connectUnavailabilityLabel(s) === null,
+    (s) =>
+      (personal ? oauthConnected.has(s.server_id) : selectedServers.includes(nameOf(s))) &&
+      connectUnavailabilityLabel(s) === null,
   ).length;
 
   const emptyStateText = () => {
+    if (loadError) return "Could not load your connections. Refresh or sign in again.";
     if (servers.length === 0) {
+      if (personal) return "No MCP servers are available to you. Contact your administrator if you need access.";
       return connectMode
         ? "No MCP servers are available to this connection yet. Ask an admin to grant your user or team access."
         : "No MCP servers configured. Add servers in Tools -> MCP Servers.";
@@ -348,7 +387,23 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
 
   if (detailServer) {
     const name = nameOf(detailServer);
-    const isConnected = selectedServers.includes(name);
+    const isConnected = personal ? oauthConnected.has(detailServer.server_id) : selectedServers.includes(name);
+    const connectionStatus = connectionStates[detailServer.server_id]?.connection_status;
+    const clientSupplied = personal && detailServer.auth_type === "oauth_delegate";
+    let statusLabel = isConnected ? "Connected" : "Not connected";
+    if (connectionStatus === "reconnect_required") statusLabel = "Reconnect needed";
+    if (connectionStatus === "unavailable") statusLabel = "Setup needed";
+    if (connectionErrors[detailServer.server_id]) statusLabel = "Status unavailable";
+    if (clientSupplied) statusLabel = "Client-managed";
+    let connectionDescription =
+      "Connect once, then use this personal connection from an authorized client. Signing out keeps the connection saved.";
+    if (connectionStatus === "reconnect_required")
+      connectionDescription = "Your authorization is no longer valid. Reconnect to restore access.";
+    if (connectionStatus === "unavailable")
+      connectionDescription = "An administrator must configure this connection before you can use it.";
+    if (clientSupplied)
+      connectionDescription =
+        "Connect through your MCP client. Your client supplies authorization for each request; LiteLLM does not save this connection.";
     const isTogglingOn = togglingOn.has(name);
     const color = getAvatarColor(name);
 
@@ -357,6 +412,11 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
       if (unavailabilityLabel !== null) {
         return <span className="text-[13px] text-muted-foreground py-2.5 shrink-0">{unavailabilityLabel}</span>;
       }
+      if (clientSupplied) return <span className="text-sm text-muted-foreground">Use your client</span>;
+      if (personal && connectionStatus === "unavailable")
+        return <span className="text-sm text-muted-foreground">Contact your administrator</span>;
+      if (personal && connectionErrors[detailServer.server_id]) return null;
+      if (personal && oauthChecking.has(detailServer.server_id)) return <Skeleton className="h-9 w-28" />;
       if (getMcpOAuthMode(detailServer) === "m2m") {
         return <span className="text-[13px] text-muted-foreground">Authorized</span>;
       }
@@ -377,18 +437,9 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
         return (
           <Button
             variant="destructive"
-            onClick={async () => {
-              try {
-                await deleteMCPOAuthUserCredential(accessToken, detailServer.server_id);
-              } catch (_) {
-                // Ignore
-              }
-              setOauthConnected((prev) => {
-                const n = new Set(prev);
-                n.delete(detailServer.server_id);
-                return n;
-              });
-              onChangeRef.current(selectedServersRef.current.filter((s) => s !== name));
+            onClick={() => {
+              setDisconnectError(false);
+              setConfirmDisconnect(true);
             }}
             className="font-semibold h-[38px] min-w-[110px]"
           >
@@ -400,9 +451,8 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
         <OAuth2ConnectButton
           server={detailServer}
           accessToken={accessToken}
-          onConnect={(id) => {
-            setOauthConnected((prev) => new Set(prev).add(id));
-          }}
+          onConnect={() => setRevision((prev) => prev + 1)}
+          label={connectionStatus === "reconnect_required" ? "Reconnect" : "Connect"}
           variant="button"
         />
       );
@@ -410,6 +460,56 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
 
     return (
       <div className="w-full">
+        <AlertDialog
+          open={confirmDisconnect}
+          onOpenChange={(open) => {
+            if (!disconnecting) setConfirmDisconnect(open);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Disconnect {name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                LiteLLM will remove your saved authorization. You can connect again later.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {disconnectError && (
+              <p role="alert" className="text-sm text-destructive">
+                Could not disconnect. Your connection has not been marked as removed. Please retry.
+              </p>
+            )}
+            <AlertDialogFooter>
+              <Button variant="outline" disabled={disconnecting} onClick={() => setConfirmDisconnect(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={disconnecting}
+                onClick={async () => {
+                  setDisconnecting(true);
+                  setDisconnectError(false);
+                  try {
+                    const result = await deleteMCPOAuthUserCredential(accessToken, detailServer.server_id);
+                    onChangeRef.current(selectedServersRef.current.filter((s) => s !== name));
+                    setConfirmDisconnect(false);
+                    setRevision((prev) => prev + 1);
+                    toast.success(
+                      result.upstream_revocation === "failed"
+                        ? "Saved connection removed. The provider could not confirm revocation."
+                        : "Saved connection removed.",
+                    );
+                  } catch {
+                    setDisconnectError(true);
+                  } finally {
+                    setDisconnecting(false);
+                  }
+                }}
+              >
+                {disconnecting ? "Disconnecting…" : "Disconnect"}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         <Button
           variant="ghost"
           size="sm"
@@ -420,7 +520,7 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
           Back
         </Button>
 
-        <div className="flex items-start gap-5 mb-7">
+        <div className="flex flex-wrap items-start gap-4 mb-7">
           {detailServer.mcp_info?.logo_url ? (
             <Logo
               src={detailServer.mcp_info.logo_url}
@@ -435,60 +535,67 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
               {name.charAt(0).toUpperCase()}
             </div>
           )}
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <h2 className="m-0 mb-1 text-[22px] font-bold text-foreground">{name}</h2>
             <p className="m-0 text-sm text-muted-foreground">{detailServer.description ?? "MCP server"}</p>
           </div>
           {renderDetailAction()}
         </div>
 
+        {personal && <p className="mb-5 text-sm text-muted-foreground">{connectionDescription}</p>}
         <h3 className="m-0 mb-3 text-[15px] font-semibold text-foreground">Information</h3>
         <div className="border rounded-lg overflow-hidden mb-7">
           {[
             ["Server ID", detailServer.server_id],
             ["Transport", handleTransport(detailServer.transport, detailServer.spec_path)],
-            ["Status", isConnected ? "Connected" : "Not connected"],
+            ["Status", statusLabel],
           ]
             .filter(([, v]) => v)
             .map(([label, value], i, arr) => (
               <div key={label} className={`flex px-4 py-3 text-[13px] ${i < arr.length - 1 ? "border-b" : ""}`}>
                 <span className="w-[140px] text-muted-foreground shrink-0">{label}</span>
-                <span className="text-foreground font-medium">{value}</span>
+                <span className="min-w-0 break-all text-foreground font-medium">{value}</span>
               </div>
             ))}
         </div>
 
-        <div className="flex items-center gap-2 mb-3">
-          <h3 className="m-0 text-[15px] font-semibold text-foreground">Available Tools</h3>
-          {!loadingTools && (
-            <span className="text-[11px] font-semibold text-muted-foreground bg-muted rounded px-1.5 py-0.5">
-              {detailTools.length}
-            </span>
-          )}
-        </div>
-        {loadingTools ? (
-          <div className="flex flex-col gap-2">
-            {Array.from({ length: 3 }, (_, i) => (
-              <div key={i} className="border rounded-lg px-3.5 py-2.5 bg-muted/30 flex flex-col gap-1.5">
-                <Skeleton className="h-3.5 w-1/3" />
-                <Skeleton className="h-3 w-2/3" />
+        {!personal && (
+          <>
+            <div className="flex items-center gap-2 mb-3">
+              <h3 className="m-0 text-[15px] font-semibold text-foreground">Available Tools</h3>
+              {!loadingTools && (
+                <span className="text-[11px] font-semibold text-muted-foreground bg-muted rounded px-1.5 py-0.5">
+                  {detailTools.length}
+                </span>
+              )}
+            </div>
+            {loadingTools ? (
+              <div className="flex flex-col gap-2">
+                {Array.from({ length: 3 }, (_, i) => (
+                  <div key={i} className="border rounded-lg px-3.5 py-2.5 bg-muted/30 flex flex-col gap-1.5">
+                    <Skeleton className="h-3.5 w-1/3" />
+                    <Skeleton className="h-3 w-2/3" />
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        ) : detailTools.length === 0 ? (
-          <div className="text-muted-foreground text-[13px] py-2">No tools available</div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {detailTools.map((tool) => (
-              <div key={tool.name} className="border rounded-lg px-3.5 py-2.5 bg-muted/30">
-                <div className={`flex items-center gap-2 ${tool.description ? "mb-1" : ""}`}>
-                  <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-[13px] font-semibold text-foreground font-mono">{tool.name}</span>
-                </div>
-                {tool.description && <p className="m-0 text-xs text-muted-foreground pl-[21px]">{tool.description}</p>}
+            ) : detailTools.length === 0 ? (
+              <div className="text-muted-foreground text-[13px] py-2">No tools available</div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {detailTools.map((tool) => (
+                  <div key={tool.name} className="border rounded-lg px-3.5 py-2.5 bg-muted/30">
+                    <div className={`flex items-center gap-2 ${tool.description ? "mb-1" : ""}`}>
+                      <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-[13px] font-semibold text-foreground font-mono">{tool.name}</span>
+                    </div>
+                    {tool.description && (
+                      <p className="m-0 text-xs text-muted-foreground pl-[21px]">{tool.description}</p>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </div>
     );
@@ -510,7 +617,9 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
             <p className="m-0 text-[13px] text-muted-foreground">Click a server to see its tools and connect</p>
           ) : (
             <div className="flex items-center gap-3">
-              <p className="m-0 text-[13px] text-muted-foreground">Browse tools, authenticate once, use in chat</p>
+              <p className="m-0 text-[13px] text-muted-foreground">
+                {personal ? "Manage your personal MCP connections" : "Browse tools, authenticate once, use in chat"}
+              </p>
               {loadingCounts ? (
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -525,9 +634,15 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
             </div>
           )}
         </div>
-        <div className="relative w-[220px]">
+        {personal && (
+          <Button variant="outline" onClick={() => setRevision((prev) => prev + 1)}>
+            Refresh connections
+          </Button>
+        )}
+        <div className="relative w-full sm:w-[220px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
+            aria-label="Search servers"
             placeholder="Search servers..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -548,11 +663,11 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
       </Tabs>
 
       {loading ? (
-        <div className="grid grid-cols-2 border rounded-lg overflow-hidden">
+        <div className="grid grid-cols-1 sm:grid-cols-2 border rounded-lg overflow-hidden">
           {Array.from({ length: 6 }, (_, idx) => (
             <div
               key={idx}
-              className={`flex items-center gap-3 p-4 ${idx % 2 === 0 ? "border-r" : ""} ${idx < 4 ? "border-b" : ""}`}
+              className={`flex items-center gap-3 p-4 ${idx % 2 === 0 ? "sm:border-r" : ""} ${idx < 4 ? "border-b" : ""}`}
             >
               <Skeleton className="w-[38px] h-[38px] rounded-xl shrink-0" />
               <div className="flex-1 min-w-0 flex flex-col gap-1.5">
@@ -565,7 +680,7 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
       ) : filtered.length === 0 ? (
         <div className="text-center text-muted-foreground text-[13px] py-12 px-3">{emptyStateText()}</div>
       ) : (
-        <div className="grid grid-cols-2 border rounded-lg overflow-hidden">
+        <div className="grid grid-cols-1 sm:grid-cols-2 border rounded-lg overflow-hidden">
           {filtered.map((server, idx) => {
             const name = nameOf(server);
             const color = getAvatarColor(name);
@@ -576,9 +691,8 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
             return (
               <div
                 key={server.server_id}
-                onClick={() => setDetailServerId(server.server_id)}
                 className={`flex items-center gap-3 p-4 bg-card cursor-pointer transition-colors hover:bg-accent/30 min-w-0 ${
-                  isLeftCol ? "border-r" : ""
+                  isLeftCol ? "sm:border-r" : ""
                 } ${Math.floor(idx / 2) < Math.floor((filtered.length - 1) / 2) ? "border-b" : ""} ${
                   unavailable ? "opacity-50" : ""
                 }`}
@@ -597,8 +711,13 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
                     {name.charAt(0).toUpperCase()}
                   </div>
                 )}
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-foreground truncate">{name}</div>
+                <Button
+                  variant="ghost"
+                  aria-label={`Open ${name}`}
+                  onClick={() => setDetailServerId(server.server_id)}
+                  className="flex-1 min-w-0 h-auto flex-col items-start px-0 whitespace-normal text-left"
+                >
+                  <span className="text-sm font-medium text-foreground truncate max-w-full">{name}</span>
                   <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
                     <span className="truncate">{server.description ?? "MCP server"}</span>
                     {count !== undefined ? (
@@ -611,7 +730,7 @@ const MCPAppsPanel: React.FC<Props> = ({ accessToken, selectedServers, onChange,
                       <Skeleton className="w-7 h-3 shrink-0" />
                     ) : null}
                   </div>
-                </div>
+                </Button>
                 {renderConnectionIndicator(server)}
                 <ChevronRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
               </div>

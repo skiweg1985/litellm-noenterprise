@@ -6,6 +6,9 @@ import { DashboardHeader } from "@/components/DashboardHeader";
 import Navbar from "@/components/navbar";
 import LoadingScreen from "@/components/common_components/LoadingScreen";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { useUIConfig } from "@/app/(dashboard)/hooks/uiConfig/useUIConfig";
+import { useOidcSession } from "@/hooks/useOidcSession";
+import { getLoginUrl } from "@/utils/returnUrlUtils";
 import { useAuth } from "@/contexts/AuthContext";
 import SidebarProvider from "@/app/(dashboard)/components/SidebarProvider";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -208,7 +211,22 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
-  const { accessToken, authLoading, passwordResetRequired } = useAuth();
+  const { accessToken, token, userID, authLoading, passwordResetRequired } = useAuth();
+  const session = useOidcSession(accessToken, userID);
+  const { data: uiConfig, isLoading: uiConfigLoading } = useUIConfig();
+  useEffect(() => {
+    if (!session.enabled || session.isPending || uiConfigLoading) return;
+    if (session.isError) window.location.replace(getLoginUrl(getProxyBaseUrl()));
+    else if (!session.data?.admin_access || uiConfig?.admin_ui_disabled) router.replace(uiHref("connect"));
+  }, [
+    session.enabled,
+    session.isPending,
+    session.isError,
+    session.data?.admin_access,
+    uiConfig?.admin_ui_disabled,
+    uiConfigLoading,
+    router,
+  ]);
   const isInvitationFlow = Boolean(searchParams.get("invitation_id"));
 
   // Legacy invitation links point at /ui/?invitation_id=; the onboarding form now lives at its own
@@ -227,7 +245,17 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
     }
   }, [authLoading, passwordResetRequired, pathname, router]);
 
-  if (authLoading || isInvitationFlow) {
+  if (
+    authLoading ||
+    (!!token && !accessToken) ||
+    isInvitationFlow ||
+    (session.enabled &&
+      (session.isPending ||
+        session.isError ||
+        !session.data?.admin_access ||
+        uiConfigLoading ||
+        uiConfig?.admin_ui_disabled))
+  ) {
     return <LoadingScreen />;
   }
 

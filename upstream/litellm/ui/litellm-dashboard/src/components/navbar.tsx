@@ -7,6 +7,7 @@ import { uiHref } from "@/utils/uiHref";
 import { useTheme } from "@/contexts/ThemeContext";
 import { revokeSessionAndClearClientState, useLogout } from "@/app/(dashboard)/hooks/useLogout";
 import { getLoginUrl } from "@/utils/returnUrlUtils";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import Link from "next/link";
@@ -24,13 +25,14 @@ import WorkerDropdown from "./Navbar/WorkerDropdown/WorkerDropdown";
 interface NavbarProps {
   accessToken: string | null;
   isPublicPage: boolean;
+  personal?: boolean;
   sidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
 }
 
 const NAV_LOGO_CLASS_NAME = "h-auto max-h-full w-auto max-w-full object-contain";
 
-const Navbar: React.FC<NavbarProps> = ({
+const FullNavbar: React.FC<NavbarProps> = ({
   accessToken,
   isPublicPage = false,
   sidebarCollapsed = false,
@@ -162,4 +164,36 @@ const Navbar: React.FC<NavbarProps> = ({
   );
 };
 
-export default Navbar;
+function PersonalNavbar({ accessToken }: Pick<NavbarProps, "accessToken">) {
+  const { logoUrl } = useTheme();
+  const baseUrl = getProxyBaseUrl();
+  const [busy, setBusy] = React.useState(false);
+  return (
+    <nav aria-label="Personal connections" className="border-b border-border bg-card">
+      <div className="flex h-14 items-center justify-between gap-3 px-4">
+        <Link href={uiHref("connect")} aria-label="Personal connections" className="min-w-0">
+          <img src={logoUrl || `${baseUrl}/get_image`} alt="LiteLLM" className="h-8 max-w-40 object-contain" />
+        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <ThemeToggle />
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void revokeSessionAndClearClientState(accessToken).finally(() => {
+                window.location.assign(getLoginUrl(baseUrl));
+              });
+            }}
+          >
+            Sign out
+          </Button>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+export default function Navbar(props: NavbarProps) {
+  return props.personal ? <PersonalNavbar accessToken={props.accessToken} /> : <FullNavbar {...props} />;
+}

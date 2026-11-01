@@ -12,9 +12,10 @@ now supports browser sessions and provider-token API access with claim-based
 admission, stable accounts, and ordered role mapping. Discovery metadata and
 API-token scopes share one configuration. Personal MCP connections reuse the
 existing managed OAuth and client-supplied modes with per-server claim rules,
-protected persistent credentials, refresh and disconnect. Existing personal-page
-integration is the remaining step in
-[the implementation spec](https://github.com/skiweg1985/litellm-noenterprise/issues/2).
+protected persistent credentials, refresh and disconnect. The existing
+`/ui/connect/` page supports personal connection management without administration
+access, including mobile controls and reconnect guidance. See
+[personal connection usage and browser checks](docs/identity.md#manage-personal-connections).
 
 ## Build and verify
 
@@ -40,4 +41,4 @@ Track work in [GitHub Issues](https://github.com/skiweg1985/litellm-noenterprise
 Changes reach protected `main` through pull requests; branch conventions are in
 [AGENTS.md](AGENTS.md#git-workflow). Preserve vendor ancestry with merge commits.
 
-Next: adapt and verify the existing personal connection page against the managed OAuth status response.
+Next: validate the configured Entra tenant and intended MCP clients with authorized access. Controlled-service tests do not establish live interoperability.

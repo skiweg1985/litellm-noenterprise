@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
+import { clearStorage } from "@/hooks/mcpOAuthUtils";
 import { getSecureItem, setSecureItem } from "@/utils/secureStorage";
 
 // Written to sessionStorage so the admin hook (useMcpOAuthFlow), the user hook
@@ -54,9 +55,12 @@ const McpOAuthCallbackContent = () => {
       // Write to all namespace keys so whichever hook is active can consume
       // the result.  sessionStorage only — no localStorage.
       const serialized = JSON.stringify(payload);
-      setSecureItem(ADMIN_RESULT_KEY, serialized);
-      setSecureItem(USER_RESULT_KEY, serialized);
-      setSecureItem(TOOLS_RESULT_KEY, serialized);
+      if (getSecureItem("litellm-user-mcp-oauth-flow-state")) {
+        setSecureItem(USER_RESULT_KEY, serialized);
+      } else {
+        setSecureItem(ADMIN_RESULT_KEY, serialized);
+        setSecureItem(TOOLS_RESULT_KEY, serialized);
+      }
     } catch (err) {
       // Silently ignore storage errors
     }
@@ -73,6 +77,7 @@ const McpOAuthCallbackContent = () => {
         // invalid URL — fall through to default
       }
     }
+    clearStorage(RETURN_URL_STORAGE_KEY);
     window.location.replace(destination);
   }, [payload]);
 

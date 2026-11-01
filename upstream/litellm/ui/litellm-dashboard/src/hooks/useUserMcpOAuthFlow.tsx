@@ -19,6 +19,7 @@ import {
   registerMcpOAuthClient,
   storeMCPOAuthUserCredential,
 } from "@/components/networking";
+import { OIDC_BROWSER_MARKER } from "@/hooks/useOidcSession";
 import { toast } from "@/lib/toast";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { generateCodeChallenge, generateCodeVerifier } from "@/utils/pkce";
@@ -76,6 +77,7 @@ export const useUserMcpOAuthFlow = ({
   clientId: preClientId,
   onSuccess,
 }: UseUserMcpOAuthFlowOptions): UseUserMcpOAuthFlowResult => {
+  const managedSession = accessToken === OIDC_BROWSER_MARKER;
   const [status, setStatus] = useState<UserMcpOAuthStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const processingRef = useRef(false);
@@ -89,7 +91,7 @@ export const useUserMcpOAuthFlow = ({
       let clientId: string | undefined = preClientId ?? undefined;
       let clientSecret: string | undefined;
 
-      if (!clientId) {
+      if (!clientId && !managedSession) {
         // Attempt dynamic client registration against the server's registration endpoint.
         try {
           const reg = await registerMcpOAuthClient(accessToken, serverId, {
@@ -137,12 +139,14 @@ export const useUserMcpOAuthFlow = ({
 
       window.location.href = authorizeUrl;
     } catch (err) {
-      const msg = extractErrorMessage(err);
+      const msg = managedSession
+        ? "Could not connect. Please try again or contact your administrator."
+        : extractErrorMessage(err);
       setError(msg);
       setStatus("error");
       toast.error(msg);
     }
-  }, [accessToken, serverId, serverAlias, scopes, preClientId]);
+  }, [accessToken, serverId, serverAlias, scopes, preClientId, managedSession]);
 
   const resumeOAuthFlow = useCallback(async () => {
     if (typeof window === "undefined" || processingRef.current) return;
@@ -212,29 +216,37 @@ export const useUserMcpOAuthFlow = ({
 
       // Persist the token for this user via the backend.
       // accessToken comes from props — it is never stored in sessionStorage.
-      await storeMCPOAuthUserCredential(accessToken, flowState.serverId, {
-        access_token: token.access_token,
-        refresh_token: token.refresh_token,
-        expires_in: token.expires_in,
-        scopes: flowState.scopes,
-      });
+      if (managedSession) {
+        if (token.connection_status !== "connected" || !token.has_credential) {
+          throw new Error("Connection was not saved.");
+        }
+      } else {
+        await storeMCPOAuthUserCredential(accessToken, flowState.serverId, {
+          access_token: token.access_token,
+          refresh_token: token.refresh_token,
+          expires_in: token.expires_in,
+          scopes: flowState.scopes,
+        });
+      }
 
       setStatus("success");
       setError(null);
       toast.success("Connected successfully");
       onSuccess();
     } catch (err) {
-      const msg = extractErrorMessage(err);
+      const msg = managedSession
+        ? "Could not connect. Please try again or contact your administrator."
+        : extractErrorMessage(err);
       setError(msg);
       setStatus("error");
       toast.error(msg);
     } finally {
-      clearStorage(FLOW_STATE_KEY);
+      clearStorage(FLOW_STATE_KEY, RESULT_KEY, RETURN_URL_KEY);
       setTimeout(() => {
         processingRef.current = false;
       }, 1000);
     }
-  }, [accessToken, serverId, onSuccess]);
+  }, [accessToken, serverId, onSuccess, managedSession]);
 
   useEffect(() => {
     resumeOAuthFlow();

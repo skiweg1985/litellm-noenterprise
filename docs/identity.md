@@ -68,7 +68,9 @@ admission rule, and selects the first matching role mapping. An eligible user
 with no matching mapping receives the configured minimal default role.
 Email is informational and never links accounts.
 
-Administrators land on `/ui/`; other users land on `/ui/connect/`. Personal
+Administrators land on `/ui/`; other users land on `/ui/connect/`. With
+`DISABLE_ADMIN_UI=true`, OIDC administrators also use the personal page;
+the administration interface remains disabled. Personal
 sessions can use the existing connection endpoints but cannot administer users,
 keys, models, or MCP servers. Existing unrelated native API keys retain their
 normal behavior. The provider access token returned during login is discarded;
@@ -99,6 +101,31 @@ with reserved, blocked records; it does not store provider bearer tokens there.
 Back up the database and deployment secrets using the same controls as other
 LiteLLM authentication data. Expired records may remain until the deployment's
 normal database housekeeping removes them; expiry is checked on every request.
+
+## Manage personal connections
+
+Open `/ui/connect/` after signing in. The existing LiteLLM page shows only
+servers available to your identity. Open a server and choose **Connect** to
+authorize it. A saved connection survives sign-out. Use an authorized MCP client
+with your provider access token to run tools; the personal page does not execute
+tools using the browser session.
+
+**Reconnect needed** means the provider rejected the saved authorization. Choose
+**Reconnect** to authorize again. **Disconnect** removes the saved credentials
+after confirmation; a failed request leaves the connection unchanged in the
+page. Provider revocation is attempted separately and may be unsupported or fail.
+
+A **Client-managed** server uses authorization supplied by the MCP client. The
+page neither stores that authorization nor offers a misleading disconnect action.
+**Setup needed** requires an administrator to configure the upstream OAuth client
+before personal authorization can start. **Refresh connections** retries loading
+after a network failure. An expired LiteLLM session returns to sign-in.
+
+The page supports phone layouts and keyboard controls. Direct administration
+navigation checks the server session before rendering management content; protected
+API endpoints independently enforce permissions. Managed token exchange returns
+connection status only. Provider and retained MCP tokens are never placed in
+browser storage or the readable dashboard envelope.
 
 ## Enable provider-token API access
 
@@ -309,10 +336,43 @@ checks also cover managed OAuth binding, both credential models, claim-based
 server permissions, refresh/reconnect, logout retention, disconnect races, and
 cold-restart persistence. They do not establish live provider compatibility.
 
-Validation on 2026-11-01 passed 41 public HTTP/MCP journeys against the installed
+Validation on 2026-11-01 passed 42 public HTTP/MCP journeys against the installed
 ARM64 image, followed by a proxy restart and stored-connection verification.
 The suite includes two identities, direct and virtual tool authorization,
 managed OAuth binding, transient and permanent refresh failures, disconnect
 during refresh, upstream rejection, and token-free connection responses.
 Proxy logs contained none of the fixture credential sentinels. Source and image
 audits and the baseline startup/completion checks also passed.
+
+### Run browser acceptance
+
+Install the existing pinned UI test dependencies and Chromium, then run the
+installed image with isolated fixtures:
+
+```sh
+npm ci --prefix upstream/litellm/tests/e2e/ui --ignore-scripts
+upstream/litellm/tests/e2e/ui/node_modules/.bin/playwright install --with-deps chromium
+python3 scripts/test_identity.py litellm-noenterprise:1.106.6 --browser
+python3 scripts/test_identity.py litellm-noenterprise:1.106.6 --browser --browser-admin-disabled
+```
+
+These runs require free loopback ports 4000, 8080 and 8090. The dedicated browser
+maps fixture hostnames locally; no system DNS configuration changes. On macOS,
+`UI_BROWSER_CHANNEL=chrome` uses installed Chrome. Set `UI_EVIDENCE_DIR` to an
+absolute path outside a disposable checkout to retain sanitized screenshots.
+The runner removes its containers and network when it finishes.
+
+Browser journeys cover real redirects, fallback permissions, managed connect,
+provider-token tool use, sign-out retention, reconnect, disconnect and its network
+failure, client-managed guidance, missing operator setup, expired sessions, direct
+admin navigation, and desktop/phone keyboard access. Browser token leakage checks
+inspect response bodies, web storage and cookie accessibility without printing
+credentials. Both administration-visibility profiles passed on 2026-11-01: 20
+desktop/phone journeys against the installed ARM64 image. Live Entra and
+third-party MCP interoperability remain unverified.
+
+The consumed personal status type is generated from the backend model. From the
+dashboard directory, run `npm run gen:api -- --personal-mcp` with `LITELLM_PYTHON`
+pointing to the installed distribution's Python interpreter. This produces
+`src/lib/http/personal-mcp-schema.d.ts`; do not edit it manually. The scoped export
+keeps unrelated upstream dashboard API bindings unchanged.
