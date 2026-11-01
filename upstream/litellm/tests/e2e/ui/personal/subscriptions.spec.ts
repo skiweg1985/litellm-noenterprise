@@ -72,7 +72,7 @@ test("native administrators can open subscription management with their existing
   await page.getByRole("textbox", { name: "Username", exact: true }).fill("admin");
   await page.getByLabel("Password", { exact: true }).fill("sk-identity-test-only");
   await page.getByRole("button", { name: "Login", exact: true }).click();
-  await expect(page).toHaveURL(/\/ui\/?$/);
+  await expect(page).toHaveURL(/\/ui\/?(?:\?login=success)?$/);
   await page.goto(path);
   await expect(page.getByRole("heading", { name: "ChatGPT subscriptions", exact: true })).toBeVisible();
   await expect(page.getByText(/subscriptions signed in/)).toBeVisible();
