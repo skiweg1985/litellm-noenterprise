@@ -1,4 +1,5 @@
 """Synthetic ChatGPT OAuth, catalog and inference boundary for acceptance tests."""
+import asyncio
 import base64
 import json
 import time
@@ -9,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 
 app = FastAPI()
-state = {"identity": "seat-a", "catalog_error": False, "status": 200, "seen": []}
+state = {"identity": "seat-a", "catalog_error": False, "status": 200, "seen": [], "statuses": [], "stream_error": False, "delay": 0}
 codes = {}
 fixtures = json.loads((Path(__file__).parents[2] / "deployment_patches/fixtures/chatgpt_sse.json").read_text())
 
@@ -22,7 +23,7 @@ def jwt(identity):
 @app.post('/control')
 async def control(request: Request):
     changes = await request.json()
-    for key in ('identity', 'catalog_error', 'status'):
+    for key in ('identity', 'catalog_error', 'status', 'statuses', 'stream_error', 'delay'):
         if key in changes:
             state[key] = changes[key]
     if changes.get('clear'):
@@ -69,10 +70,19 @@ async def usage():
 async def responses(request: Request):
     identity = request.headers.get('chatgpt-account-id')
     state['seen'].append(identity)
-    if state['status'] != 200:
-        return JSONResponse({"error": {"type": "server_error", "message": "Synthetic upstream failure"}}, status_code=state['status'])
+    status = state['statuses'].pop(0) if state['statuses'] else state['status']
+    if status != 200:
+        return JSONResponse({"error": {"type": "server_error", "message": "Synthetic upstream failure"}}, status_code=status)
+    response_id = 'resp_' + uuid.uuid4().hex
+    events = json.loads(json.dumps(fixtures['text']).replace('resp_synthetic', response_id))
+    stream_error, delay = state['stream_error'], state['delay']
     async def stream():
-        for event in fixtures['text']:
+        for i, event in enumerate(events):
+            if delay:
+                await asyncio.sleep(delay)
+            if stream_error and i == 3:
+                yield 'event: error\ndata: {"type":"error","code":"server_error","message":"Synthetic interrupted stream"}\n\n'
+                return
             yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
     return StreamingResponse(stream(), media_type='text/event-stream')
 

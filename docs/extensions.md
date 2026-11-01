@@ -83,8 +83,23 @@ model_list:
 
 The `chatgpt-account:` value is an account selector, not a provider secret.
 Missing or unknown selectors fail instead of falling back to another account.
-Request logs identify the selected subscription. Catalog visibility does not
+Request logs record the subscription actually used at each provider attempt. Catalog visibility does not
 automatically create a model deployment.
+
+## Find subscription requests
+
+In **Logs**, the Subscription column shows the name recorded when each request
+was sent. Open a request to see its attempts, outcomes, order, connection revision,
+and observed token usage. **Filter logs for …** selects that subscription across
+renames; the link preserves the selected time window. Existing log access rules
+still apply.
+
+Attribution is stored with ordinary spend logs and follows their retention policy.
+It does not create extra spend records or change model names. Cache-only and older
+records have no provider-attempt attribution. Missing provider usage is shown as
+unknown, including interrupted streams; no token estimate is presented as observed
+subscription usage. Names and connection revisions are historical snapshots and
+do not expose provider account identifiers or credentials.
 
 ## Monitor subscriptions
 

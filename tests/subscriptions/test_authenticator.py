@@ -30,6 +30,20 @@ class AuthenticatorTests(unittest.TestCase):
         self.path.write_text(json.dumps({"access_token": "expired", "refresh_token": "synthetic-refresh", "expires_at": 1}))
         auth._REJECTED_REFRESH.clear()
 
+    def test_first_legacy_dispatch_has_persisted_identity_before_watcher_runs(self):
+        from litellm.proxy.extensions.chatgpt_subscriptions.registry import Registry
+        record={'access_token':token(),'account_id':'synthetic-account','expires_at':time.time()+3600}
+        self.path.write_text(json.dumps(record))
+        access, provider, snapshot=self.instance.request_credentials()
+        self.assertEqual(access,record['access_token'])
+        self.assertEqual(provider,'synthetic-account')
+        self.assertIsNotNone(snapshot)
+        self.assertTrue(snapshot.connection_revision)
+        self.assertEqual(snapshot.subscription_id,Registry().records()['default']['subscription_id'])
+        self.assertEqual(snapshot.connection_revision,json.loads(self.path.read_text())['connection_revision'])
+        _,_,again=self.instance.request_credentials()
+        self.assertEqual(snapshot,again)
+
     def test_transient_transport_failure_does_not_poison_retry(self):
         calls = []
         new_token = token()

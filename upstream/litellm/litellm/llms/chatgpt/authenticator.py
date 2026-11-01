@@ -131,6 +131,32 @@ class Authenticator:
     def get_api_base(self) -> str:
         return os.getenv("CHATGPT_API_BASE") or os.getenv("OPENAI_CHATGPT_API_BASE") or CHATGPT_API_BASE
 
+    def request_credentials(self):
+        """Read token, provider identity and revision from one locked credential generation."""
+        from litellm.proxy.extensions.chatgpt_subscriptions import tokens
+        from litellm.proxy.extensions.chatgpt_subscriptions.registry import Registry
+        from litellm.proxy.extensions.chatgpt_subscriptions.accounts import Account
+        from litellm.proxy.extensions.chatgpt_subscriptions.attribution import CredentialSnapshot
+        registry = Registry()
+        with tokens.locked(registry.lock_path), self._auth_file_lock():
+            access_token = self.get_access_token()
+            account_id = self.get_account_id()
+            record = self._read_auth_file() or {}
+            # Legacy token files can be used before the background watcher runs.
+            # Initialize their durable identity while holding the same generation lock.
+            revision = _optional_str(record.get("connection_revision"))
+            if revision is None:
+                account = Account(self.account, path=self.auth_file)
+                fields = account._connection_fields(tokens.identity(record))
+                revision = fields["connection_revision"]
+                self._write_auth_file({**record, "connection_revision": revision})
+                account._update(**fields)
+            entry = registry.seed([self.account])[self.account]
+            snapshot = CredentialSnapshot(
+                entry["subscription_id"], entry["display_name"], revision,
+            )
+            return access_token, account_id, snapshot
+
     def get_access_token(self) -> str:
         # Subscription authentication: never start a device-code sign-in inside a request.
         from litellm.proxy.extensions.chatgpt_subscriptions.registry import Registry

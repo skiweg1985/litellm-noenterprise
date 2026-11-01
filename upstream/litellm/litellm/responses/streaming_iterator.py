@@ -336,6 +336,9 @@ class BaseResponsesAPIStreamingIterator:
         self.litellm_metadata = litellm_metadata
         self.custom_llm_provider = custom_llm_provider
         self.request_data: dict[str, object] = request_data or {}
+        from litellm.proxy.extensions.chatgpt_subscriptions.attribution import Attempt
+        attempt = self.request_data.pop("_chatgpt_subscription_attempt", None)
+        self._subscription_attempt = attempt if isinstance(attempt, Attempt) else None
         self.call_type: str | None = call_type
 
         # set hidden params for response headers (e.g., x-litellm-model-id)
@@ -519,6 +522,11 @@ class BaseResponsesAPIStreamingIterator:
                         if _billed_response is None or _billed_response is _response_obj
                         else openai_responses_api_chunk.model_copy(update={"response": _billed_response})
                     )
+                    if self._subscription_attempt is not None:
+                        self._subscription_attempt.finish(
+                            "failure" if _chunk_type == openai_types.ResponsesAPIStreamEvents.RESPONSE_FAILED else "success",
+                            response=_response_obj,
+                        )
                     self.completed_response = _terminal_chunk
                     stamp_responses_usage_cost(_billed_response, self.logging_obj)
 
@@ -898,6 +906,8 @@ class BaseResponsesAPIStreamingIterator:
         Trigger failure handlers before bubbling the exception.
         Only calls handlers once even if called multiple times.
         """
+        if self._subscription_attempt is not None:
+            self._subscription_attempt.finish("failure", error=exception)
         # Prevent double-calling failure handlers
         if self._failure_handled:
             return
