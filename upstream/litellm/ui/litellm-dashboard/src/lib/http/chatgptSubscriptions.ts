@@ -36,6 +36,7 @@ export interface SubscriptionAccount extends SubscriptionIdentity, SubscriptionM
     missing: { model_name: string; slug: string }[];
   } | null;
   available_models_error?: string | null;
+  deployment_ids?: string[];
   credentials: string[];
   models: string[];
   requests_24h: number | null;

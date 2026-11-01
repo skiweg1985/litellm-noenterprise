@@ -89,6 +89,18 @@ describe("ChatGPT subscription management", () => {
     clients.splice(0).forEach((client) => client.clear());
   });
 
+  it("links an available model to the native form with its subscription preselected", async () => {
+    getSubscriptions.mockResolvedValue({
+      accounts: [account({ subscription_id: "a28c114f-05bb-4b71-af6f-e114be7c5f36" })],
+      problems: [],
+    });
+    mount();
+    expect(await screen.findByRole("link", { name: "Add model example-model" })).toHaveAttribute(
+      "href",
+      "/ui/models-and-endpoints?tab=add&subscription=a28c114f-05bb-4b71-af6f-e114be7c5f36&subscription_model=example-model",
+    );
+  });
+
   it("creates a named subscription and keeps its sign-in an explicit action", async () => {
     const user = userEvent.setup();
     const createdFields = {
