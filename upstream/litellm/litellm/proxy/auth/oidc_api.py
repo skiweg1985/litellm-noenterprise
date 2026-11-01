@@ -52,6 +52,12 @@ class APISettings(BaseModel):
 def settings() -> APISettings | None:
     from litellm.proxy.proxy_server import general_settings
 
+    from litellm.proxy.auth.oidc_settings import current_snapshot
+    snapshot = current_snapshot.get()
+    if snapshot is not None:
+        if snapshot.error is not None:
+            raise snapshot.error
+        return snapshot.api
     value = general_settings.get("oidc_api")
     if value is None:
         return None
@@ -140,12 +146,14 @@ def authorize_api_route(request: Request, role: str) -> None:
 
 
 async def authenticate_provider(request: Request, api_key: str | None) -> UserAPIKeyAuth | None:
-    config = settings()
-    if config is None or not api_key or api_key.startswith("sk-") or api_key.count(".") != 2:
+    if not api_key or api_key.startswith("sk-") or api_key.count(".") != 2:
         return None
     from litellm.proxy.proxy_server import master_key
 
     if isinstance(master_key, str) and secrets.compare_digest(api_key.encode(), master_key.encode()):
+        return None
+    config = settings()
+    if config is None:
         return None
     mcp = get_request_route(request).rstrip("/") == "/mcp"
     try:
@@ -211,8 +219,6 @@ async def authenticate_provider(request: Request, api_key: str | None) -> UserAP
 
 def require_personal_identity(request: Request) -> None:
     """Gate personal credential routes only; native MCP administration is unchanged."""
-    if settings() is None:
-        return
     path = get_request_route(request).rstrip("/")
     personal = path == "/v1/mcp/user-credentials" or path == "/v1/mcp/server/oauth/session"
     personal = personal or bool(
@@ -221,7 +227,7 @@ def require_personal_identity(request: Request) -> None:
     personal = personal or bool(
         re.fullmatch(r"/v1/mcp/server/oauth/[^/]+/(?:authorize|register|token)", path)
     )
-    if personal:
+    if personal and settings() is not None:
         raise HTTPException(
             403, "Personal MCP connections require a provider user token or OIDC browser session"
         )

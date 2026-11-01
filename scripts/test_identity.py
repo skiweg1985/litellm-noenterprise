@@ -14,6 +14,9 @@ from pathlib import Path
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("image", default="litellm-noenterprise:baseline", nargs="?")
 parser.add_argument("--browser", action="store_true", help="Run the personal UI browser journeys on loopback ports 4000, 8080, 8090")
+parser.add_argument("--oidc-settings", action="store_true", help="Start without file-owned OIDC for settings acceptance")
+parser.add_argument("--oidc-empty-salt", action="store_true", help="Test rejected OIDC settings saves with an explicitly empty encryption key")
+parser.add_argument("--browser-proxy-port", type=int, default=4000, help="Loopback browser port; 0 chooses an available port")
 parser.add_argument("--browser-admin-disabled", action="store_true")
 parser.add_argument("--reject-missing-master", action="store_true")
 parser.add_argument("--reject-invalid-api", action="store_true")
@@ -31,6 +34,8 @@ parser.add_argument(
     help="Development only: run mounted source instead of installed image code",
 )
 args = parser.parse_args()
+if args.oidc_empty_salt and (not args.oidc_settings or args.browser):
+    parser.error("--oidc-empty-salt requires --oidc-settings without --browser")
 root = Path(__file__).resolve().parents[1]
 prefix = "litellm-ne-identity-" + uuid.uuid4().hex[:8]
 containers = []
@@ -59,6 +64,8 @@ def run(name, *parts):
 
 
 with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
+    restart_dir = Path(tmp) / "restart"
+    restart_dir.mkdir()
     config = Path(tmp) / "config.yaml"
     config.write_text("""model_list:
   - model_name: fixture-model
@@ -162,6 +169,9 @@ general_settings:
             "master_key: sk-identity-test-only",
             "master_key: " + json.dumps(args.master_key),
         )
+    if args.oidc_settings:
+        value = value.split("  oidc_api:", 1)[0]
+        value += '  mcp_advertised_versions: ["2025-06-18", "2025-11-25", "2026-07-28"]\n'
     if args.response_cache:
         value += "\nlitellm_settings:\n  cache: true\n  cache_params:\n    type: local\n"
     if fnmatch.fnmatch("test_subscription_headers.py", args.test_pattern):
@@ -212,7 +222,7 @@ general_settings:
             "--schema=/app/schema.prisma",
             "--skip-generate",
         )
-        mount = ["--mount", f"type=bind,src={root},dst=/work,readonly"]
+        mount = ["--mount", f"type=bind,src={root},dst=/work,readonly", "--mount", f"type=bind,src={restart_dir},dst=/restart"]
         run(
             "mcp-upstream",
             *(["-p", "127.0.0.1:8090:8090"] if args.browser else []),
@@ -238,12 +248,16 @@ general_settings:
             args.image,
             "/work/tests/identity/fixtures/issuer.py",
         )
-        source_env = (
-            ["-e", "PYTHONPATH=/work/upstream/litellm"] if args.source_overlay else []
-        )
+        source_env = (["-e", "PYTHONPATH=/work/upstream/litellm"] if args.source_overlay else [])
+        if args.source_overlay and args.oidc_settings:
+            source_env = []
+            for relative in ("proxy/auth/oidc_settings.py", "proxy/auth/oidc_identity.py", "proxy/auth/oidc_api.py", "proxy/auth/user_api_key_auth.py", "proxy/discovery_endpoints/ui_discovery_endpoints.py", "proxy/proxy_server.py"):
+                source_path = root / "upstream/litellm/litellm" / relative
+                if source_path.exists():
+                    source_env.extend(["--mount", f"type=bind,src={source_path},dst=/opt/venv/lib/python3.12/site-packages/litellm/{relative},readonly"])
         run(
             "proxy",
-            *(["-p", "127.0.0.1:4000:4000"] if args.browser else []),
+            *(["-p", f"127.0.0.1:{args.browser_proxy_port or ''}:4000"] if args.browser else []),
             *mount,
             *source_env,
             *(["-e", "DISABLE_ADMIN_UI=true"] if args.browser_admin_disabled else []),
@@ -255,6 +269,8 @@ general_settings:
             "LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true",
             "-e",
             "OIDC_TEST_CLIENT_SECRET=fixture-only",
+            *(["-e", "LITELLM_SALT_KEY="] if args.oidc_empty_salt else []),
+            *(["-e", "UI_USERNAME=admin", "-e", "UI_PASSWORD=fixture-settings-admin-only"] if args.oidc_settings else []),
             "-e", "CHATGPT_AUTH_BASE=http://chatgpt:8091",
             "-e", "CHATGPT_API_BASE=http://chatgpt:8091",
             "-e", "CHATGPT_MODELS_URL=http://chatgpt:8091/models",
@@ -272,6 +288,8 @@ general_settings:
             "--use_prisma_db_push",
             "--num_workers",
             str(args.proxy_workers),
+            "--timeout_worker_healthcheck",
+            "60",
         )
         for _ in range(120):
             result = docker(
@@ -318,11 +336,12 @@ general_settings:
             else:
                 raise RuntimeError("All proxy workers did not become ready")
         if args.browser:
+            port = docker("inspect", prefix + "-proxy", "--format", '{{(index (index .NetworkSettings.Ports "4000/tcp") 0).HostPort}}').stdout.strip()
             ui = root / "upstream/litellm/tests/e2e/ui"
             subprocess.run(
-                [str(ui / "node_modules/.bin/playwright"), "test", "--config", "playwright.personal.config.ts"],
+                [str(ui / "node_modules/.bin/playwright"), "test", "--config", "playwright.oidc-settings.config.ts" if args.oidc_settings else "playwright.personal.config.ts"],
                 cwd=ui,
-                env={**os.environ, "UI_ADMIN_DISABLED": str(args.browser_admin_disabled).lower()},
+                env={**os.environ, "UI_ADMIN_DISABLED": str(args.browser_admin_disabled).lower(), "UI_PROXY_URL": "http://proxy:" + port},
                 check=True,
             )
             raise SystemExit(0)
@@ -334,6 +353,8 @@ general_settings:
             *mount,
             "-e",
             "DATABASE_URL=" + database,
+            "-e", "OIDC_SETTINGS_MODE=" + str(args.oidc_settings).lower(),
+            "-e", "OIDC_EMPTY_SALT_MODE=" + str(args.oidc_empty_salt).lower(),
             "-e",
             "EXPECTED_API_SCOPE=" + args.api_scope_name,
             "-e",
@@ -365,7 +386,7 @@ general_settings:
         print(result.stderr)
         if result.returncode:
             raise RuntimeError("identity acceptance tests failed")
-        if args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py", "test_subscription_reserves.py", "test_subscription_distribution.py"):
+        if not args.oidc_empty_salt and (args.oidc_settings or args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py", "test_subscription_reserves.py", "test_subscription_distribution.py")):
             docker("restart", prefix + "-proxy")
             for _ in range(90):
                 ready = docker(
@@ -382,6 +403,8 @@ general_settings:
             else:
                 raise RuntimeError("proxy did not restart")
             restart_tests = []
+            if args.oidc_settings:
+                restart_tests.append("test_oidc_settings.OIDCSettingsTests.test_z_saved_configuration_and_browser_session_survive_cold_restart")
             if args.test_pattern in ("test*.py", "test_mcp.py"):
                 restart_tests.append("test_mcp.PersonalMCPTests.test_connection_survives_cold_restart")
             if args.test_pattern in ("test*.py", "test_subscription_models.py"):
@@ -393,6 +416,9 @@ general_settings:
             for test in restart_tests:
                 persistence = docker(
                     "run", "--rm", "--network", prefix, *mount,
+                    "-e", "OIDC_SETTINGS_MODE=" + str(args.oidc_settings).lower(),
+                    "-e", "OIDC_SETTINGS_RESTART_PHASE=read",
+                    "-e", "EXPECTED_MASTER_KEY=" + args.master_key,
                     "-e", "MCP_RESTART_PHASE=read",
                     "-e", "SUBSCRIPTION_RESTART_PHASE=read",
                     "--workdir", "/work/tests/identity",
@@ -403,6 +429,28 @@ general_settings:
                 print(persistence.stderr)
                 if persistence.returncode:
                     raise RuntimeError("cold-restart persistence failed: " + test)
+        if args.oidc_settings and not args.oidc_empty_salt:
+            # Explicit file ownership wins over the still-persisted database setup.
+            config.write_text(config.read_text().replace("general_settings:\n", "general_settings:\n  oidc_identity: null\n", 1))
+            docker("restart", prefix + "-proxy")
+            for _ in range(90):
+                ready = docker("exec", prefix + "-proxy", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')", check=False)
+                if ready.returncode == 0:
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError("proxy did not restart with file ownership")
+            owned = docker(
+                "run", "--rm", "--network", prefix, *mount,
+                "-e", "OIDC_SETTINGS_FILE_NULL=true",
+                "-e", "EXPECTED_MASTER_KEY=" + args.master_key,
+                "--workdir", "/work/tests/identity", "--entrypoint", "python", args.image,
+                "-m", "unittest", "-v", "test_oidc_settings.FileOwnershipTests", check=False,
+            )
+            print(owned.stdout)
+            print(owned.stderr)
+            if owned.returncode:
+                raise RuntimeError("file ownership did not override stored OIDC settings")
         logs = docker("logs", prefix + "-proxy", check=False)
         if any(
             marker in logs.stdout + logs.stderr
@@ -410,6 +458,9 @@ general_settings:
                 "mcp-fixture-access-",
                 "mcp-fixture-refresh-",
                 "client-supplied-sentinel",
+                "secret-invalid-save-sentinel",
+                "empty-key-save-secret-sentinel",
+                "rotated-settings-secret-sentinel",
             )
         ):
             raise AssertionError("MCP credential material appeared in proxy logs")
