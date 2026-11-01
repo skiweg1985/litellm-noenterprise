@@ -303,7 +303,7 @@ export function MCPSection({
           .map((server) => [server.server_id, server.name]);
         if (!known) items.unshift([key, `Saved reference: ${key}`]);
         return (
-          <div className="space-y-3 rounded border p-3" key={key}>
+          <div className="space-y-3 rounded border p-3" key={index}>
             <Choice
               label={`MCP rule ${index + 1} server`}
               value={key}
