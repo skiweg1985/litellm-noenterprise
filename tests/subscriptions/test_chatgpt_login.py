@@ -117,6 +117,16 @@ class LoginTests(unittest.TestCase):
         if account.login_task is not previous:
             await asyncio.wait_for(account.login_task, 5)
 
+    async def wait_for_login_pending(self, account):
+        async def ready():
+            while account.status()["state"] != "login_pending":
+                if account.login_task.done():
+                    await account.login_task
+                    self.fail("Sign-in task ended before publishing its pending state")
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(ready(), 5)
+
     # -- token file --------------------------------------------------------
 
     def test_write_is_atomic_private_and_reentrant(self):
@@ -243,7 +253,7 @@ class LoginTests(unittest.TestCase):
         async def run():
             self.fake.polls_until_confirmed = 10**6
             account.start_login()
-            await asyncio.sleep(0.05)
+            await self.wait_for_login_pending(account)
             self.assertEqual(account.status()["state"], "login_pending")
             await account.cancel_login()
             self.assertEqual(account.status()["state"], "ok")
@@ -262,7 +272,7 @@ class LoginTests(unittest.TestCase):
 
         async def run():
             first.start_login()
-            await asyncio.sleep(0.05)
+            await self.wait_for_login_pending(first)
             second.start_login()
             await asyncio.wait_for(second.login_task, 5)
             self.assertEqual(second.status()["state"], "login_pending")
