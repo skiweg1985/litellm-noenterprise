@@ -14,6 +14,8 @@ from pathlib import Path
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("image", default="litellm-noenterprise:baseline", nargs="?")
 parser.add_argument("--browser", action="store_true", help="Run the personal UI browser journeys on loopback ports 4000, 8080, 8090")
+parser.add_argument("--oidc-settings", action="store_true", help="Start without file-owned OIDC for settings acceptance")
+parser.add_argument("--browser-proxy-port", type=int, default=4000, help="Loopback browser port; 0 chooses an available port")
 parser.add_argument("--browser-admin-disabled", action="store_true")
 parser.add_argument("--reject-missing-master", action="store_true")
 parser.add_argument("--reject-invalid-api", action="store_true")
@@ -162,6 +164,8 @@ general_settings:
             "master_key: sk-identity-test-only",
             "master_key: " + json.dumps(args.master_key),
         )
+    if args.oidc_settings:
+        value = value.split("  oidc_api:", 1)[0]
     if args.response_cache:
         value += "\nlitellm_settings:\n  cache: true\n  cache_params:\n    type: local\n"
     if fnmatch.fnmatch("test_subscription_headers.py", args.test_pattern):
@@ -238,12 +242,16 @@ general_settings:
             args.image,
             "/work/tests/identity/fixtures/issuer.py",
         )
-        source_env = (
-            ["-e", "PYTHONPATH=/work/upstream/litellm"] if args.source_overlay else []
-        )
+        source_env = (["-e", "PYTHONPATH=/work/upstream/litellm"] if args.source_overlay else [])
+        if args.source_overlay and args.oidc_settings:
+            source_env = []
+            for relative in ("proxy/auth/oidc_settings.py", "proxy/auth/oidc_identity.py", "proxy/auth/oidc_api.py", "proxy/auth/user_api_key_auth.py", "proxy/discovery_endpoints/ui_discovery_endpoints.py", "proxy/proxy_server.py"):
+                source_path = root / "upstream/litellm/litellm" / relative
+                if source_path.exists():
+                    source_env.extend(["--mount", f"type=bind,src={source_path},dst=/opt/venv/lib/python3.12/site-packages/litellm/{relative},readonly"])
         run(
             "proxy",
-            *(["-p", "127.0.0.1:4000:4000"] if args.browser else []),
+            *(["-p", f"127.0.0.1:{args.browser_proxy_port or ''}:4000"] if args.browser else []),
             *mount,
             *source_env,
             *(["-e", "DISABLE_ADMIN_UI=true"] if args.browser_admin_disabled else []),
@@ -255,6 +263,7 @@ general_settings:
             "LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true",
             "-e",
             "OIDC_TEST_CLIENT_SECRET=fixture-only",
+            "-e", "UI_USERNAME=admin", "-e", "UI_PASSWORD=fixture-settings-admin-only",
             "-e", "CHATGPT_AUTH_BASE=http://chatgpt:8091",
             "-e", "CHATGPT_API_BASE=http://chatgpt:8091",
             "-e", "CHATGPT_MODELS_URL=http://chatgpt:8091/models",
@@ -318,11 +327,12 @@ general_settings:
             else:
                 raise RuntimeError("All proxy workers did not become ready")
         if args.browser:
+            port = docker("inspect", prefix + "-proxy", "--format", '{{(index (index .NetworkSettings.Ports "4000/tcp") 0).HostPort}}').stdout.strip()
             ui = root / "upstream/litellm/tests/e2e/ui"
             subprocess.run(
-                [str(ui / "node_modules/.bin/playwright"), "test", "--config", "playwright.personal.config.ts"],
+                [str(ui / "node_modules/.bin/playwright"), "test", "--config", "playwright.oidc-settings.config.ts" if args.oidc_settings else "playwright.personal.config.ts"],
                 cwd=ui,
-                env={**os.environ, "UI_ADMIN_DISABLED": str(args.browser_admin_disabled).lower()},
+                env={**os.environ, "UI_ADMIN_DISABLED": str(args.browser_admin_disabled).lower(), "UI_PROXY_URL": "http://proxy:" + port},
                 check=True,
             )
             raise SystemExit(0)
@@ -334,6 +344,7 @@ general_settings:
             *mount,
             "-e",
             "DATABASE_URL=" + database,
+            "-e", "OIDC_SETTINGS_MODE=" + str(args.oidc_settings).lower(),
             "-e",
             "EXPECTED_API_SCOPE=" + args.api_scope_name,
             "-e",

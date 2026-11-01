@@ -52,6 +52,10 @@ class APISettings(BaseModel):
 def settings() -> APISettings | None:
     from litellm.proxy.proxy_server import general_settings
 
+    from litellm.proxy.auth.oidc_settings import current_snapshot
+    snapshot = current_snapshot.get()
+    if snapshot is not None:
+        return snapshot.api
     value = general_settings.get("oidc_api")
     if value is None:
         return None
