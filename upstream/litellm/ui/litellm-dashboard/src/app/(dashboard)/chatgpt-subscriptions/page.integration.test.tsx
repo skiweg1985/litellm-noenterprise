@@ -5,6 +5,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Page from "./page";
 import { ApiError } from "@/lib/http/client";
 import type { SubscriptionAccount } from "@/lib/http/chatgptSubscriptions";
+import { getBulkAssignments, saveBulkAssignments } from "@/lib/http/subscriptionBulk";
+
+vi.mock("@/lib/http/subscriptionBulk", () => ({ getBulkAssignments: vi.fn(), saveBulkAssignments: vi.fn() }));
 
 const { auth, getSubscriptions, updateSubscription, createSubscription, renameSubscription } = vi.hoisted(() => ({
   auth: {
@@ -87,6 +90,27 @@ describe("ChatGPT subscription management", () => {
   afterEach(() => {
     cleanup();
     clients.splice(0).forEach((client) => client.clear());
+  });
+
+  it("offers an optional model review after connection without automatically saving assignments", async () => {
+    vi.mocked(getBulkAssignments).mockResolvedValue({
+      subscription_id: "subscription-primary",
+      display_name: "primary",
+      models: [],
+    });
+    vi.mocked(saveBulkAssignments).mockReset();
+    getSubscriptions.mockResolvedValue({
+      accounts: [account({ token_valid: false, state: "logged_out" })],
+      problems: [],
+    });
+    mount();
+    await screen.findByRole("region", { name: "Subscription primary" });
+    expect(screen.queryByRole("button", { name: "Assign to models" })).not.toBeInTheDocument();
+    getSubscriptions.mockResolvedValue({ accounts: [account()], problems: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Assign to models" }));
+    expect(await screen.findByRole("dialog", { name: "Assign primary to models" })).toBeVisible();
+    expect(saveBulkAssignments).not.toHaveBeenCalled();
   });
 
   it("links an available model to the native form with its subscription preselected", async () => {

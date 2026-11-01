@@ -229,6 +229,8 @@ class _ProxyModelTable(Protocol):
         self, *, where: Mapping[str, object], data: Mapping[str, object]
     ) -> Awaitable[_ProxyModelRow | None]: ...
 
+    def update_many(self, *, where: Mapping[str, object], data: Mapping[str, object]) -> Awaitable[int]: ...
+
     def delete(self, *, where: Mapping[str, object]) -> Awaitable[_ProxyModelRow | None]: ...
 
     def delete_many(self, *, where: Mapping[str, object]) -> Awaitable[int]: ...
@@ -1174,6 +1176,17 @@ async def patch_model(
     Raises:
         ProxyException: For various error conditions including authentication and database errors
     """
+    return await patch_model_record(model_id, patch_data, user_api_key_dict)
+
+
+async def patch_model_record(
+    model_id: str,
+    patch_data: updateDeployment,
+    user_api_key_dict: UserAPIKeyAuth,
+    *,
+    expected_version: str | None = None,
+):
+    """Native partial update with an optional reviewed database-row version."""
     from litellm.proxy.proxy_server import (
         litellm_proxy_admin_name,
         llm_router,
@@ -1302,7 +1315,18 @@ async def patch_model(
                 model_id=model_id,
                 member_write=member_write,
             ) as table:
-                return await table.update(where={"model_id": model_id}, data=update_data)
+                if expected_version is None:
+                    return await table.update(where={"model_id": model_id}, data=update_data)
+                try:
+                    version = datetime.datetime.fromisoformat(expected_version)
+                except ValueError:
+                    raise HTTPException(400, "Invalid model review version.") from None
+                count = await table.update_many(
+                    where={"model_id": model_id, "updated_at": version}, data=update_data
+                )
+                if count != 1:
+                    raise HTTPException(409, "The model changed since review. Refresh the review before saving.")
+                return await table.find_unique(where={"model_id": model_id})
 
         # Handle team model updates with proper alias management
         updated_model: Final = await _update_team_model_in_db(

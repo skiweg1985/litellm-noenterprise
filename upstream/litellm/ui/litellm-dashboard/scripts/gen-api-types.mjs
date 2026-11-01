@@ -22,12 +22,14 @@ const repoRoot = resolve(dashboardDir, "..", "..");
 // only the personal connection contract is consumed by this distribution.
 const personalMcp = process.argv.includes("--personal-mcp");
 const subscriptions = process.argv.includes("--subscriptions");
+const subscriptionBulk = process.argv.includes("--subscription-bulk");
 const subscriptionUsage = process.argv.includes("--subscription-usage");
 const subscriptionLogs = process.argv.includes("--subscription-logs");
 let outputFile = "schema.d.ts";
 if (personalMcp) outputFile = "personal-mcp-schema.d.ts";
 if (subscriptions) outputFile = "subscriptions-schema.d.ts";
 if (subscriptionLogs) outputFile = "subscription-logs-schema.d.ts";
+if (subscriptionBulk) outputFile = "subscription-bulk-schema.d.ts";
 if (subscriptionUsage) outputFile = "subscription-usage-schema.d.ts";
 const outPath = join(dashboardDir, "src", "lib", "http", outputFile);
 const specDir = mkdtempSync(join(tmpdir(), "litellm-openapi-"));
@@ -43,12 +45,12 @@ const python = (process.env.LITELLM_PYTHON ?? "python3").split(" ");
 // across CI and contributors. inspect.cleandoc normalizes every description to one
 // canonical form regardless of interpreter, so the generated file is stable.
 let dumpSpec;
-if (subscriptionUsage) {
+if (subscriptionUsage || subscriptionBulk) {
   dumpSpec = [
     "import json, os, sys, tempfile",
     "from fastapi import FastAPI",
     "from litellm.proxy.extensions.chatgpt_subscriptions.accounts import Accounts",
-    "from litellm.proxy.extensions.chatgpt_subscriptions.observed_usage import router",
+    subscriptionBulk ? "from litellm.proxy.extensions.chatgpt_subscriptions.bulk_assignment import router" : "from litellm.proxy.extensions.chatgpt_subscriptions.observed_usage import router",
     "with tempfile.TemporaryDirectory() as directory:",
     "    os.environ['CHATGPT_TOKEN_DIR'] = directory",
     "    os.environ['CHATGPT_ACCOUNTS'] = 'default'",

@@ -99,6 +99,20 @@ dispatch. Membership changes, deletion and rename therefore cannot make a stale
 worker send to a removed member. The public parent ID remains the ordinary model
 log filter; each attempt also records its stable member deployment ID.
 
+After connecting an account, **Assign to models** opens an optional review of
+existing ChatGPT models. Compatible reserve models append the account last;
+distribution models add it to their membership. Deselect any model to leave it
+unchanged. Fixed models start unselected and require an explicit replacement or
+mode change. The review shows current and proposed memberships before saving.
+Matching uses the upstream model ID, not the public model name. Configuration-backed
+models are shown with a read-only explanation; unavailable catalogs offer retry.
+
+Saving rechecks catalog eligibility, administrator access and each full model-row
+version. Concurrent edits cause a per-model conflict instead of an overwrite.
+Successful rows stay saved when another row fails. Refresh the review after a
+conflict; already assigned accounts are not added twice. A failed assignment does
+not disconnect the account, and signing in alone never changes model routing.
+
 Configuration-managed deployments can still use an explicit account alias:
 
 ```yaml
@@ -236,3 +250,8 @@ The native route still describes Prisma metadata as generic JSON; the separate
 attribution component documents its reserved fields without changing legacy
 SpendLogs serialization. The UI defensively reads older or incomplete metadata
 and retains its existing pagination response handling.
+
+Bulk review bindings are generated from the dedicated admin routes with
+`npm run gen:api -- --subscription-bulk`. The review version is checked atomically
+by the existing model update service; ordinary model validation, encryption,
+audit logging and router refresh still apply.
