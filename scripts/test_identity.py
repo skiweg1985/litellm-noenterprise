@@ -265,7 +265,7 @@ general_settings:
             "LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true",
             "-e",
             "OIDC_TEST_CLIENT_SECRET=fixture-only",
-            "-e", "UI_USERNAME=admin", "-e", "UI_PASSWORD=fixture-settings-admin-only",
+            *(["-e", "UI_USERNAME=admin", "-e", "UI_PASSWORD=fixture-settings-admin-only"] if args.oidc_settings else []),
             "-e", "CHATGPT_AUTH_BASE=http://chatgpt:8091",
             "-e", "CHATGPT_API_BASE=http://chatgpt:8091",
             "-e", "CHATGPT_MODELS_URL=http://chatgpt:8091/models",
