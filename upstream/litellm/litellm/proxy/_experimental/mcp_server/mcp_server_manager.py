@@ -455,6 +455,7 @@ class _AuthorizationServerMetadataPayload(TypedDict, total=False):
     authorization_endpoint: str
     token_endpoint: str
     registration_endpoint: str
+    revocation_endpoint: str
     client_id_metadata_document_supported: ReadOnly[object]
     scopes_supported: Sequence[str]
     grant_types_supported: Sequence[str]
@@ -3550,6 +3551,36 @@ class MCPServerManager:
         access: MCPServerAccess | None = None,
         general_settings: Mapping[str, object] | None = None,
     ) -> list[str]:
+        from litellm.proxy._experimental.mcp_server.oidc_policy import apply_server_rules
+
+        allowed = await self._get_allowed_mcp_servers_without_oidc_rules(
+            user_api_key_auth, access=access, general_settings=general_settings
+        )
+        result = apply_server_rules(user_api_key_auth, self.get_registry().values(), allowed)
+        if user_api_key_auth is not None and user_api_key_auth.oidc_identity_source:
+            from litellm.proxy._types import LiteLLM_ObjectPermissionTable
+
+            original = user_api_key_auth.object_permission
+            if original is not None and original.mcp_servers:
+                result = [sid for sid in result if sid in self.expand_permission_list(original.mcp_servers)]
+            permission = original.model_copy(update={"mcp_servers": result}) if original else LiteLLM_ObjectPermissionTable(
+                object_permission_id="oidc-request-grants", mcp_servers=result
+            )
+            candidate = user_api_key_auth.model_copy(update={"object_permission": permission})
+            resolved = await MCPRequestHandler.get_mcp_server_access(candidate)
+            result = [sid for sid in result if sid in resolved.server_ids]
+            if access is not None:
+                result = [sid for sid in result if sid in access.server_ids]
+        scope = self._admitted_session_resource_scope(user_api_key_auth)
+        return [sid for sid in result if scope is None or sid == scope]
+
+    async def _get_allowed_mcp_servers_without_oidc_rules(
+        self,
+        user_api_key_auth: UserAPIKeyAuth | None = None,
+        *,
+        access: MCPServerAccess | None = None,
+        general_settings: Mapping[str, object] | None = None,
+    ) -> list[str]:
         """
         Get the allowed MCP Servers for the user.
 
@@ -5371,6 +5402,7 @@ class MCPServerManager:
                 authorization_url=data.get("authorization_endpoint"),
                 token_url=data.get("token_endpoint"),
                 registration_url=data.get("registration_endpoint"),
+                revocation_url=data.get("revocation_endpoint"),
                 client_id_metadata_document_supported=data.get("client_id_metadata_document_supported") is True,
                 discovered_issuer=claimed_issuer if isinstance(claimed_issuer, str) and claimed_issuer else None,
                 authorization_response_iss_parameter_supported=data.get(

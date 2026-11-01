@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import hashlib
 import html as _html
 import json
 import secrets
@@ -301,6 +303,9 @@ class _BridgeAuthorizationCode(LiteLLMBaseModel):
     upstream_code: str = Field(min_length=1)
     litellm_user_id: str = Field(min_length=1)
     mcp_server_id: str = Field(min_length=1)
+    oidc_pkce_challenge: str | None = None
+    oidc_redirect_uri: str | None = None
+    oidc_expires_at: float | None = None
 
 
 def is_bridge_authorization_code(code: str) -> bool:
@@ -314,6 +319,8 @@ def seal_bridge_authorization_code(
     litellm_user_id: str,
     mcp_server_id: str,
     oauth_nonce: str | None = None,
+    oidc_pkce_challenge: str | None = None,
+    oidc_redirect_uri: str | None = None,
 ) -> str:
     """Seal the upstream authorization code and the SSO-captured litellm user into a gateway
     authorization code. The DCR client only echoes this opaque value back at the token endpoint; the
@@ -328,6 +335,9 @@ def seal_bridge_authorization_code(
             "litellm_user_id": litellm_user_id,
             "mcp_server_id": mcp_server_id,
             "oauth_nonce": oauth_nonce,
+            "oidc_pkce_challenge": oidc_pkce_challenge,
+            "oidc_redirect_uri": oidc_redirect_uri,
+            "oidc_expires_at": time.time() + 300 if oidc_pkce_challenge else None,
         },
         sort_keys=True,
     )
@@ -643,12 +653,13 @@ async def _store_per_user_token_server_side(
     token_response: dict[str, Any],
     identity_binding_proof: str | None = None,
     cimd_client_id: str | None = None,
+    strict: bool = False,
 ) -> None:
     """Persist the OAuth token server-side and warm the Redis cache.
 
     Called from the token endpoint after a successful code exchange or refresh.
-    Errors are logged but NOT re-raised — the token is always returned to the
-    client even when server-side storage fails.
+    Legacy token relays retain best-effort storage. Managed OIDC exchanges set
+    strict=True and fail without returning credentials when persistence fails.
     """
     from litellm.proxy._experimental.mcp_server.oauth2_token_cache import (  # noqa: PLC0415
         compute_per_user_token_ttl,
@@ -658,6 +669,8 @@ async def _store_per_user_token_server_side(
 
     access_token: Final[str | None] = token_response.get("access_token")
     if not access_token:
+        if strict:
+            raise HTTPException(502, "Upstream did not return an access token")
         return
 
     raw_expires: Final = token_response.get("expires_in")
@@ -699,6 +712,8 @@ async def _store_per_user_token_server_side(
             server.server_id,
             exc,
         )
+        if strict:
+            raise HTTPException(503, "Personal connection could not be saved") from None
         return  # Don't warm Redis if DB write failed
 
     from litellm.proxy._experimental.mcp_server.mcp_server_manager import (  # noqa: PLC0415
@@ -985,8 +1000,17 @@ async def authorize_with_server(
 
     binding: Final = resolved_server.oauth_identity_binding
     enforce_binding: Final = binding is not None and binding.mode == "enforce"
+    from litellm.proxy.auth.oidc_identity import settings as oidc_settings
+
+    oidc_managed = resolved_server.needs_user_oauth_token and oidc_settings() is not None
+    if oidc_managed and not getattr(request.state, "oidc_user_id", None):
+        raise HTTPException(403, "Managed OAuth requires the authenticated personal connection endpoint")
+    if oidc_managed:
+        from litellm.proxy._experimental.mcp_server.oidc_policy import require_managed_client
+
+        require_managed_client(resolved_server)
     cimd_client_id: Final = get_cimd_client_id(resolved_server)
-    if enforce_binding or cimd_client_id:
+    if enforce_binding or cimd_client_id or oidc_managed:
         _require_s256_pkce(code_challenge, code_challenge_method)
 
     if resolved_server.is_dcr_bridge:
@@ -1021,7 +1045,9 @@ async def authorize_with_server(
 
     # Seal the authenticated caller into state so the token exchange cannot select another credential owner.
     litellm_user_id: str | None = None
-    if enforce_binding or (resolved_server.is_dcr_bridge and resolved_server.is_oauth_delegate):
+    if oidc_managed:
+        litellm_user_id = request.state.oidc_user_id
+    elif enforce_binding or (resolved_server.is_dcr_bridge and resolved_server.is_oauth_delegate):
         subject: Final = await _resolve_oauth_authorization_user(
             request, resolved_server, redirect_uri, state, enforce_binding
         )
@@ -1154,8 +1180,17 @@ async def exchange_token_with_server(
             ),
         )
 
+    from litellm.proxy.auth.oidc_identity import settings as oidc_settings
+
+    oidc_managed = resolved_server.needs_user_oauth_token and oidc_settings() is not None
+    if oidc_managed and not getattr(request.state, "oidc_user_id", None):
+        raise HTTPException(403, "Managed OAuth requires the authenticated personal connection endpoint")
+    if oidc_managed:
+        from litellm.proxy._experimental.mcp_server.oidc_policy import require_managed_client
+
+        require_managed_client(resolved_server)
     request_user_id: Final = (
-        await extract_user_id_from_request(request)
+        getattr(request.state, "oidc_user_id", None) or await extract_user_id_from_request(request)
         if resolved_server.needs_user_oauth_token or resolved_server.oauth_identity_binding is not None
         else None
     )
@@ -1197,6 +1232,9 @@ async def exchange_token_with_server(
     bridge_upstream_scope: str | None = None
     refresh_request_scope: str | None = None
     is_bridge: Final = resolved_server.is_oauth_delegate and resolved_server.is_dcr_bridge
+
+    if oidc_managed and grant_type != "authorization_code":
+        raise HTTPException(400, "Managed credentials are refreshed by the gateway")
 
     if grant_type == "refresh_token":
         # Phase 1 for a bridge refresh: open the client's refresh envelope, re-validate the sealed
@@ -1245,6 +1283,18 @@ async def exchange_token_with_server(
         # sealed server to this request so a code minted for one bridge server cannot be spent at another.
         # A raw upstream code (scripted path) opens to None and the code is used as-is.
         bridge_identity = open_bridge_authorization_code(code)
+        if oidc_managed:
+            if bridge_identity is None or bridge_identity.litellm_user_id != request_user_id:
+                raise HTTPException(403, "OAuth authorization belongs to another user or is unbound")
+            challenge = base64.urlsafe_b64encode(hashlib.sha256((code_verifier or "").encode()).digest()).decode().rstrip("=")
+            if (
+                not bridge_identity.oidc_pkce_challenge
+                or challenge != bridge_identity.oidc_pkce_challenge
+                or redirect_uri != bridge_identity.oidc_redirect_uri
+                or not bridge_identity.oidc_expires_at
+                or bridge_identity.oidc_expires_at < time.time()
+            ):
+                raise HTTPException(403, "OAuth authorization binding is invalid or expired")
         if bridge_identity is not None:
             if bridge_identity.mcp_server_id != resolved_server.server_id:
                 raise HTTPException(
@@ -1356,6 +1406,17 @@ async def exchange_token_with_server(
     # Store server-side when the server is configured for per-user OAuth and
     # the calling client has provided a valid LiteLLM identity.
     # Errors are non-fatal: the token is still returned to the client.
+    if oidc_managed:
+        await _store_per_user_token_server_side(
+            server=resolved_server, user_id=request_user_id, token_response=token_response,
+            identity_binding_proof=binding_proof, strict=True,
+        )
+        from litellm.proxy._experimental.mcp_server.oidc_policy import credential_status
+        return JSONResponse(
+            (await credential_status(request_user_id, resolved_server)).model_dump(mode="json"),
+            headers=TOKEN_NO_CACHE_HEADERS,
+        )
+
     if resolved_server.needs_user_oauth_token:
         user_id: Final = resolved_user_id
         if user_id:
@@ -2549,6 +2610,8 @@ async def callback(
                 litellm_user_id=litellm_user_id,
                 mcp_server_id=mcp_server_id,
                 oauth_nonce=state_data.get("oauth_nonce"),
+                oidc_pkce_challenge=state_data.get("code_challenge"),
+                oidc_redirect_uri=state_data.get("client_redirect_uri"),
             )
         elif isinstance(dcr_client_id, str) and dcr_client_id and isinstance(mcp_server_id, str) and mcp_server_id:
             forwarded_code = seal_passthrough_authorization_code(

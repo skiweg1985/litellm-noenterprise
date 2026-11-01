@@ -82,6 +82,7 @@ class OIDCSettings(BaseModel):
     default_role: Literal["internal_user_viewer", "customer"] = "internal_user_viewer"
     session_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
     session_secret_env: str = "LITELLM_OIDC_SESSION_SECRET"
+    mcp_access_rules: dict[str, ClaimRule] = Field(default_factory=dict)
     retained_claims: list[str] = Field(default_factory=lambda: ["roles", "groups", "scp", "scope"])
     allow_insecure_http: bool = False
 
@@ -114,6 +115,7 @@ class OIDCSettings(BaseModel):
     def retained_policy_claims(self, claims: dict[str, Any]) -> dict[str, Any]:
         paths = {*self.retained_claims, self.subject_claim, self.access_rule.claim}
         paths.update(mapping.rule.claim for mapping in self.role_mappings)
+        paths.update(rule.claim for rule in self.mcp_access_rules.values())
         return {path: claim_value(claims, path) for path in sorted(paths) if claim_value(claims, path) is not None}
 
 
@@ -580,10 +582,16 @@ async def authenticate_browser(request: Request, api_key: str | None) -> UserAPI
         user_id=user.user_id,
         user_role=user.user_role,
         user_email=user.user_email,
+        org_id=user.organization_id,
         api_key=state["session_hash"],
         is_session_token=True,
         models=list(user.models or []),
         metadata={"oidc_browser": True},
     )
+    auth.requires_fresh_policy = True
     auth.oidc_identity_source = "browser"
+    auth.oidc_verified_claims = state["claims"]
+    from litellm.proxy._experimental.mcp_server.oidc_policy import attach_user_permissions
+
+    await attach_user_permissions(auth, user)
     return auth

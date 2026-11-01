@@ -222,6 +222,7 @@ class _OAuthCredentialAccessToken(TypedDict):
 
 
 class OAuthCredentialPayload(_OAuthCredentialAccessToken, total=False):
+    reconnect_required: bool
     identity_binding_proof: ReadOnly[str]
     cimd_client_id: ReadOnly[str]
     type: str
@@ -1767,6 +1768,7 @@ async def store_user_oauth_credential(
     skip_byok_guard: bool = False,
     identity_binding_proof: str | None = None,
     cimd_client_id: str | None = None,
+    expected_refresh_token: str | None = None,
 ) -> None:
     """Persist an OAuth2 access token for a user+server pair.
 
@@ -1819,8 +1821,42 @@ async def store_user_oauth_credential(
                 server_id,
             )
 
-    encoded: Final = encrypt_value_helper(json.dumps(payload))
-    await _db_upsert_user_credential_row(prisma_client, user_id, server_id, encoded)
+    if expected_refresh_token is not None:
+        previous = await _db_find_user_credential_row(prisma_client, user_id, server_id)
+        previous_payload = decode_oauth_payload(previous.credential_b64) if previous else None
+        if not previous_payload or previous_payload.get("refresh_token") != expected_refresh_token:
+            raise HTTPException(403, "OAuth connection changed while refreshing")
+        if previous_payload.get("connected_at"):
+            payload["connected_at"] = previous_payload["connected_at"]
+        encoded = encrypt_value_helper(json.dumps(payload))
+        updated = await _user_credential_actions(prisma_client).update_many(
+            where={"user_id": user_id, "server_id": server_id, "credential_b64": previous.credential_b64},
+            data={"credential_b64": encoded},
+        )
+        if updated == 0:
+            raise HTTPException(403, "OAuth connection was disconnected or replaced while refreshing")
+    else:
+        encoded = encrypt_value_helper(json.dumps(payload))
+        await _db_upsert_user_credential_row(prisma_client, user_id, server_id, encoded)
+
+
+async def mark_user_oauth_reconnect(
+    prisma_client, user_id: str, server_id: str, refresh_token: str | None = None,
+    *, access_token: str | None = None,
+) -> None:
+    row = await _db_find_user_credential_row(prisma_client, user_id, server_id)
+    credential = decode_oauth_payload(row.credential_b64) if row else None
+    if credential is None:
+        return
+    if refresh_token is not None and credential.get("refresh_token") != refresh_token:
+        return
+    if access_token is not None and credential.get("access_token") != access_token:
+        return
+    credential["reconnect_required"] = True
+    await _user_credential_actions(prisma_client).update_many(
+        where={"user_id": user_id, "server_id": server_id, "credential_b64": row.credential_b64},
+        data={"credential_b64": encrypt_value_helper(json.dumps(credential))},
+    )
 
 
 def is_oauth_credential_expired(cred: OAuthCredentialPayload, buffer_seconds: int = 0) -> bool:

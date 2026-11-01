@@ -48,6 +48,7 @@ class CredentialPersist(Protocol):
         scopes: tuple[str, ...] | None,
         identity_binding_proof: str | None = None,
         cimd_client_id: str | None = None,
+        expected_refresh_token: str | None = None,
     ) -> None: ...
 
 
@@ -66,6 +67,10 @@ def _parse_expires_in(raw: object) -> int | None:
 
 def _parse_scopes(raw: object) -> tuple[str, ...] | None:
     return tuple(raw.split()) if isinstance(raw, str) and raw else None
+
+
+class OAuthRefreshRejected(Exception):
+    """The authorization server definitively rejected the retained grant."""
 
 
 class AuthorizationCodeRefresher:
@@ -88,12 +93,14 @@ class AuthorizationCodeRefresher:
         *,
         clock: Callable[[], float] = time.time,
         identity_validator: BindingValidator = enforce_oauth_identity_binding,
+        mark_reconnect: Callable[[str, str, str], Awaitable[None]] | None = None,
     ) -> None:
         self._server_lookup = server_lookup
         self._token_endpoint = token_endpoint
         self._persist = persist
         self._clock = clock
         self._identity_validator = identity_validator
+        self._mark_reconnect = mark_reconnect
 
     async def refresh(self, user_id: str, server_id: str, token: OAuthToken) -> OAuthToken | None:
         try:
@@ -139,7 +146,12 @@ class AuthorizationCodeRefresher:
             "refresh_token": token.refresh_token,
             **token_request.body,
         }
-        body: Final = await self._token_endpoint(token_url, form, token_request.headers)
+        try:
+            body = await self._token_endpoint(token_url, form, token_request.headers)
+        except OAuthRefreshRejected:
+            if self._mark_reconnect is not None:
+                await self._mark_reconnect(user_id, server_id, token.refresh_token)
+            return None
         if body is None:
             return None
         access_token: Final = body.get("access_token")
@@ -165,6 +177,7 @@ class AuthorizationCodeRefresher:
             new_refresh,
             expires_in,
             scopes or None,
+            expected_refresh_token=token.refresh_token,
             **({"identity_binding_proof": binding_proof} if binding_proof is not None else {}),
             **({"cimd_client_id": cimd_client_id} if cimd_client_id is not None else {}),
         )

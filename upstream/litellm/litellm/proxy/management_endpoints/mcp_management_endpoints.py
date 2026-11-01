@@ -1353,6 +1353,15 @@ if MCP_AVAILABLE:
             servers: Final = await _resolve_accessible_mcp_servers(user_api_key_dict)
             redacted_mcp_servers = sorted(_redact_mcp_credentials_list(servers), key=_mcp_server_display_order)
 
+        if user_api_key_dict.oidc_identity_source:
+            allowed_ids = set(await global_mcp_server_manager.get_allowed_mcp_servers(user_api_key_dict))
+            # Claim grants can make a server visible without legacy key/team grants.
+            redacted_mcp_servers = [
+                global_mcp_server_manager.build_mcp_server_table(server)
+                for sid in allowed_ids
+                if (server := global_mcp_server_manager.get_mcp_server_by_id(sid)) is not None
+            ]
+
         if connected_app_view is True and is_ui_session_credential(user_api_key_dict):
             reachable_ids: Final = await _connected_app_reachable_server_ids(user_api_key_dict)
             for server in redacted_mcp_servers:
@@ -2324,6 +2333,10 @@ if MCP_AVAILABLE:
     ):
         async with _oauth_server_operation(server_id, user_api_key_dict, request=request) as mcp_server:
             raise_if_not_oauth2(mcp_server)
+            if user_api_key_dict.oidc_identity_source:
+                from litellm.proxy._experimental.mcp_server.oidc_policy import require_managed_client
+
+                require_managed_client(mcp_server)
             # Use the server's stored client_id when the caller doesn't supply one
             stored_or_supplied_client_id: Final = mcp_server.client_id or client_id or ""
             ephemeral_dcr_client: Final = (
@@ -2384,6 +2397,10 @@ if MCP_AVAILABLE:
     ):
         async with _oauth_server_operation(server_id, user_api_key_dict, request=request) as mcp_server:
             raise_if_not_oauth2(mcp_server)
+            if user_api_key_dict.oidc_identity_source:
+                from litellm.proxy._experimental.mcp_server.oidc_policy import require_managed_client
+
+                require_managed_client(mcp_server)
             # Sealed passthrough codes exist only for the authorization_code grant. A refresh_token
             # grant must never open one: the minted client is unrecoverable after the single flow by
             # contract, so an expired browser-held token re-runs authorize instead.
@@ -2435,6 +2452,8 @@ if MCP_AVAILABLE:
         user_api_key_dict: UserAPIKeyAuth = Depends(user_api_key_auth),
     ):
         async with _oauth_server_operation(server_id, user_api_key_dict, request=request) as mcp_server:
+            if user_api_key_dict.oidc_identity_source and mcp_server.needs_user_oauth_token:
+                raise HTTPException(400, "Managed OAuth uses the centrally configured client; registration is an operator task")
             request_data: Final = await read_request_body(request=request)
             data: Final[Mapping[str, object]] = {**request_data}
             client_redirect_uris: Final = client_supplied_redirect_uris(data.get("redirect_uris"))
@@ -2609,6 +2628,8 @@ if MCP_AVAILABLE:
         # This endpoint accepts an opaque token with no upstream identity validation, so it must be
         # closed for identity-bound servers or it becomes a bypass of the token-relay binding check.
         registry_server: Final = _manager.get_mcp_server_by_id(server_id)
+        if registry_server is not None and registry_server.is_oauth_delegate:
+            raise HTTPException(400, "Client-supplied OAuth credentials cannot be stored as managed connections")
         binding: Final = registry_server.oauth_identity_binding if registry_server else None
         if binding is not None and binding.mode == "enforce":
             raise HTTPException(
@@ -2688,10 +2709,15 @@ if MCP_AVAILABLE:
             )
 
             await global_mcp_server_manager.invalidate_user_oauth_token_cache(target_user_id, server_id)
+        from litellm.proxy._experimental.mcp_server.oidc_policy import revoke_upstream
+        from litellm.proxy._experimental.mcp_server.mcp_server_manager import global_mcp_server_manager
+
+        revocation = await revoke_upstream(
+            global_mcp_server_manager.get_mcp_server_by_id(server_id), cred_to_delete
+        )
         return MCPOAuthUserCredentialStatus(
-            server_id=server_id,
-            has_credential=False,
-            is_expired=False,
+            server_id=server_id, has_credential=False, is_expired=False,
+            connection_mode="managed", connection_status="disconnected", upstream_revocation=revocation,
         )
 
     @router.get(
@@ -2707,12 +2733,19 @@ if MCP_AVAILABLE:
     ):
         """Return credential status (has_credential, expiry) without exposing the token."""
         prisma_client: Final = get_prisma_client_or_throw("Database not connected. Connect a database to your proxy")
+        await _authorize_and_fetch_mcp_server(prisma_client, user_api_key_dict, server_id)
         user_id: Final = user_api_key_dict.user_id or ""
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"error": "User ID not found in token"},
             )
+        if user_api_key_dict.oidc_identity_source:
+            from litellm.proxy._experimental.mcp_server.oidc_policy import credential_status
+
+            server = global_mcp_server_manager.get_mcp_server_by_id(server_id)
+            if server is not None:
+                return await credential_status(user_id, server)
         cred: Final = await get_user_oauth_credential(prisma_client, user_id, server_id)
         if cred is None:
             return MCPOAuthUserCredentialStatus(server_id=server_id, has_credential=False, is_expired=False)
@@ -2758,7 +2791,7 @@ if MCP_AVAILABLE:
         servers: Final = {srv.server_id: srv for srv in await get_mcp_servers(prisma_client, server_ids)}
         allowed_server_ids: Final = (
             None
-            if user_api_key_has_admin_view(user_api_key_dict)
+            if user_api_key_has_admin_view(user_api_key_dict) and not user_api_key_dict.oidc_identity_source
             else frozenset[str]().union(
                 *[
                     await global_mcp_server_manager.get_allowed_mcp_servers(context)
@@ -2787,6 +2820,8 @@ if MCP_AVAILABLE:
                 continue
             sid = cred["server_id"]
             srv = await visible_metadata(sid)
+            if user_api_key_dict.oidc_identity_source and srv is None:
+                continue
             expires_at: str | None = cred.get("expires_at")
             items.append(
                 MCPUserCredentialListItem(
