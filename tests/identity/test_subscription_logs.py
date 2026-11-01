@@ -1,10 +1,11 @@
 """Subscription attribution observed through real proxy requests and persisted log API."""
 
-import time
 import os
-import uuid
+import time
 import unittest
-from datetime import datetime, timezone, timedelta
+import uuid
+from datetime import datetime, timedelta, timezone
+
 import test_subscription_models as model_tests
 
 
@@ -232,7 +233,7 @@ class SubscriptionLogTests(model_tests.SubscriptionModelTests):
         other = self.logs(name, account["subscription_id"], headers=keys[1])
         self.assertEqual(other["total"], 1, other)
         self.assertTrue(
-            set(r["request_id"] for r in own["data"]).isdisjoint(
+            {r["request_id"] for r in own["data"]}.isdisjoint(
                 r["request_id"] for r in other["data"]
             )
         )
@@ -347,6 +348,7 @@ class SubscriptionLogTests(model_tests.SubscriptionModelTests):
         self.assertEqual(attempt["connection_revision"], account["connection_revision"])
         self.assertEqual(attempt["outcome"], "success")
         self.assertEqual(attempt["sequence"], 1)
+        self.assertEqual(attempt["model_id"], created.json()["model_id"])
         self.assertEqual(row["model_group"], name)
         self.assertNotIn(account["account"] + "/", row["model"])
         self.assertEqual(self.logs(name, account["subscription_id"])["total"], 1)

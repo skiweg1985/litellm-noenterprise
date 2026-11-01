@@ -58,7 +58,7 @@ def ledger(logging_obj):
     value = getattr(logging_obj, "_chatgpt_subscription_ledger", None)
     if not isinstance(value, Ledger):
         value = Ledger()
-        setattr(logging_obj, "_chatgpt_subscription_ledger", value)
+        logging_obj._chatgpt_subscription_ledger = value
     return value
 
 
@@ -80,21 +80,21 @@ def begin(logging_obj, credential, model):
             else "retry"
         )
     )
-    value = dict(
-        attempt_id=str(uuid4()),
-        sequence=len(state.attempts) + 1,
-        subscription_id=credential.subscription_id,
-        display_name=credential.display_name,
-        connection_revision=credential.connection_revision,
-        model=model,
-        model_id=model_id,
-        started_at=now(),
-        ended_at=None,
-        outcome="incomplete",
-        reason=reason,
-        input_tokens=None,
-        output_tokens=None,
-    )
+    value = {
+        "attempt_id": str(uuid4()),
+        "sequence": len(state.attempts) + 1,
+        "subscription_id": credential.subscription_id,
+        "display_name": credential.display_name,
+        "connection_revision": credential.connection_revision,
+        "model": model,
+        "model_id": model_id,
+        "started_at": now(),
+        "ended_at": None,
+        "outcome": "incomplete",
+        "reason": reason,
+        "input_tokens": None,
+        "output_tokens": None,
+    }
     attempt = Attempt(value)
     state.attempts.append(attempt)
     return attempt

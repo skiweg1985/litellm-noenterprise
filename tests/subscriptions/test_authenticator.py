@@ -43,6 +43,16 @@ class AuthenticatorTests(unittest.TestCase):
         self.assertEqual(snapshot.connection_revision,json.loads(self.path.read_text())['connection_revision'])
         _,_,again=self.instance.request_credentials()
         self.assertEqual(snapshot,again)
+        expired={**json.loads(self.path.read_text()),'expires_at':1,'refresh_token':'synthetic-refresh'}
+        self.path.write_text(json.dumps(expired))
+        claims={'exp':int(time.time())+3600,'https://api.openai.com/auth':{'chatgpt_account_id':'synthetic-account'}}
+        payload=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+        refreshed='e30.'+payload+'.synthetic'
+        with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200,json={'access_token':refreshed,'id_token':refreshed}))) as client, patch.object(auth,'get_httpx_client',return_value=client):
+            access,provider,after_refresh=self.instance.request_credentials()
+        self.assertEqual(access,refreshed)
+        self.assertEqual(provider,'synthetic-account')
+        self.assertEqual(snapshot,after_refresh)
 
     def test_transient_transport_failure_does_not_poison_retry(self):
         calls = []

@@ -150,6 +150,8 @@ class Authenticator:
                 fields = account._connection_fields(tokens.identity(record))
                 revision = fields["connection_revision"]
                 self._write_auth_file({**record, "connection_revision": revision})
+                if (self._read_auth_file() or {}).get("connection_revision") != revision:
+                    raise GetAccessTokenError(message="Subscription attribution could not be initialized.", status_code=503)
                 account._update(**fields)
             entry = registry.seed([self.account])[self.account]
             snapshot = CredentialSnapshot(
