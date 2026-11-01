@@ -86,6 +86,28 @@ Missing or unknown selectors fail instead of falling back to another account.
 Request logs record the subscription actually used at each provider attempt. Catalog visibility does not
 automatically create a model deployment.
 
+## Distribute model requests
+
+Choose **Distribute requests** in a model's subscription routing settings and add
+its compatible subscriptions. Each new request gives every available selected
+subscription equal preference through LiteLLM's native random selection. Counts
+can differ; this policy does not measure remaining quota or promise equal totals.
+The choice applies to this model and leaves global routing unchanged.
+
+Disconnected and retired subscriptions are skipped. A temporarily unavailable
+member can rejoin when its cooldown ends; reconnecting an account makes it eligible
+again. Cooldowns use the existing router cache: configure its Redis backend when
+workers must share cooldown state; otherwise each worker tracks its own cooldowns.
+Editing the membership changes which accounts new requests may use. The same editor also offers a fixed account or an ordered preferred account with
+reserves; distribution ignores list order.
+
+Transient failures can retry another eligible member before content is returned.
+Each member is attempted at most once for that request. Invalid client requests
+are not retried across the list. Exhausted capacity returns an error, and an
+interrupted or cancelled stream does not start another provider attempt. Request
+logs identify actual attempts; skipped members and cache-only results do not
+create provider-attempt records.
+
 ## Find subscription requests
 
 In **Logs**, the Subscription column shows the name recorded when each request
