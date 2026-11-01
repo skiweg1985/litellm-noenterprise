@@ -17,6 +17,8 @@ class SubscriptionAttemptRecord(TypedDict):
     ended_at: str | None
     outcome: Literal["success", "failure", "cancelled", "incomplete"]
     reason: Literal["initial", "retry", "fallback"]
+    routing_mode: NotRequired[Literal["fixed", "priority", "distribution"] | None]
+    reserve_switch: NotRequired[bool]
     input_tokens: int | None
     output_tokens: int | None
     error_code: NotRequired[str]
