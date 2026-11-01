@@ -225,7 +225,7 @@ class Account:
             state = self._state()
             if self.retired() or state.get("login_epoch", 0) != epoch or (automatic and state.get("suspended")):
                 return False
-            self._update(login_generation=generation, suspended=False, login=None)
+            self._update(login_generation=generation, suspended=False, login=None, error=None)
             return True
 
     async def _publish_flow(self, generation, **changes):
@@ -241,10 +241,10 @@ class Account:
                     break
                 except BlockingIOError:
                     state = self._state()
-                    if state.get("login_epoch", 0) != epoch or automatic or not state.get("suspended"):
+                    if state.get("login_epoch", 0) != epoch or automatic or not (state.get("suspended") or state.get("error")):
                         return  # another current flow is already serving this request
-                    # A cancelled worker may still be in an upstream HTTP call.
-                    # Keep the new explicit request until that old worker releases its lock.
+                    # A cancelled or failed worker may still be closing its HTTP client.
+                    # Keep the explicit retry until that worker releases its lock.
                     await asyncio.sleep(0.05)
             generation = secrets.token_hex(16)
             if not await asyncio.to_thread(self._begin_flow, epoch, automatic, generation):
@@ -332,9 +332,25 @@ class Account:
             self.start_login(automatic=True)
 
     def start_login(self, automatic=False):
-        if not self.retired() and not self._login_running():
-            epoch = self._state().get("login_epoch", 0)
-            self.login_task = asyncio.ensure_future(self._run_login(epoch, automatic))
+        if self.retired():
+            return
+        state = self._state()
+        epoch = state.get("login_epoch", 0)
+        if self._login_running():
+            if not automatic and state.get("error"):
+                # An error can be visible before the old task has closed its provider
+                # connection. Preserve an explicit retry without overlapping flows.
+                finishing = self.login_task
+
+                def retry_after_cleanup(_):
+                    if self.login_task is finishing and not finishing.cancelled():
+                        # Retain the request's epoch: cancellation on another worker
+                        # must invalidate it even if it races with this callback.
+                        self.login_task = asyncio.ensure_future(self._run_login(epoch, False))
+
+                finishing.add_done_callback(retry_after_cleanup)
+            return
+        self.login_task = asyncio.ensure_future(self._run_login(epoch, automatic))
 
     def _invalidate_login(self, remove_credentials=False):
         with tokens.locked(self.registry_path), tokens.locked(self.path):
