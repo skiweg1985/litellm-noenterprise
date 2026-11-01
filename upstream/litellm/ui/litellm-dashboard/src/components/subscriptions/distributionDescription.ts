@@ -3,4 +3,4 @@ export const SUBSCRIPTION_DISTRIBUTION_DESCRIPTION =
   "Distribute new requests across the selected available subscriptions with equal preference. Counts may differ; this does not optimize quotas. Unavailable subscriptions are skipped and can rejoin after recovery.";
 
 /** Enabled once the shared native model editor and distribution routing ship together. */
-export const SUBSCRIPTION_DISTRIBUTION_ENABLED = false;
+export const SUBSCRIPTION_DISTRIBUTION_ENABLED = true;

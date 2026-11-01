@@ -55,6 +55,23 @@ describe("subscription assignment editor", () => {
     expect(within(list).getAllByRole("listitem")).toHaveLength(1);
     expect(within(list).getByRole("listitem")).toHaveTextContent("Reserve");
   });
+  it("distributes across selected members without suggesting an ordered preference", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Editor />);
+    await user.click(await screen.findByRole("combobox", { name: "Subscription routing mode" }));
+    await user.click(await screen.findByRole("option", { name: "Distribute requests" }));
+    expect(screen.getByText(/equal preference/)).toBeVisible();
+    await user.click(screen.getByRole("combobox", { name: "Add subscription" }));
+    await user.click(await screen.findByRole("option", { name: "Reserve" }));
+    const list = screen.getByRole("list", { name: "ChatGPT subscriptions" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(list).getAllByRole("listitem")[0]).toHaveTextContent("Primary");
+    expect(screen.queryByRole("button", { name: /Move .* up/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Move .* down/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove Primary" }));
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(list).getByRole("listitem")).toHaveTextContent("Reserve");
+  });
   it("keeps unavailable assignments visible and directs the administrator to sign in or remove them", async () => {
     vi.mocked(getSubscriptions).mockResolvedValue({
       accounts: [{ ...account("first", "Primary"), token_valid: false, state: "credential_rejected" }],
