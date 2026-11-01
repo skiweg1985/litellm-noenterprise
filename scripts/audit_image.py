@@ -32,7 +32,21 @@ assert m.version('litellm') == '1.106.6'
 from importlib.resources import files
 assert (files('litellm')/'proxy/_experimental/out/connect/index.html').is_file()
 assert (files('litellm')/'litellm_core_utils/audio_utils/audio_health_check.wav').is_file()
-print('Installed distributions and rebuilt runtime assets verified')
+import hashlib, json
+from pathlib import Path
+notices = Path('/usr/share/licenses/litellm-noenterprise')
+notice_manifest = json.loads((notices/'manifest.json').read_text())
+assert notice_manifest['format'] == 1
+assert {'next', 'react', 'react-dom'} <= {package['name'] for package in notice_manifest['packages']}
+assert 'node/LICENSE' in notice_manifest['files']
+assert (notices/'node/LICENSE').stat().st_size > 100000
+browser_notices = files('litellm')/'proxy/_experimental/out/third-party-notices'
+assert (browser_notices/'manifest.json').read_bytes() == (notices/'manifest.json').read_bytes()
+for relative, expected in notice_manifest['files'].items():
+    assert hashlib.sha256((notices/relative).read_bytes()).hexdigest() == expected, relative
+    assert hashlib.sha256((browser_notices/relative).read_bytes()).hexdigest() == expected, relative
+assert not Path('/usr/local/lib/node_modules/npm').exists(), 'Build npm tooling leaked into runtime'
+print('Installed distributions, rebuilt runtime assets, and retained Node/dashboard notices verified')
 """
 subprocess.run(['docker','run','--rm','--network','none','--entrypoint','python',args.image,'-c',script],check=True)
 print(f'PASS: {count} image layers contain no excluded LiteLLM enterprise package paths')

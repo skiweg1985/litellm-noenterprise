@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify image startup, rebuilt UI, MCP route registration, and real proxy transport."""
 import argparse
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -53,10 +54,14 @@ with tempfile.TemporaryDirectory(prefix=name) as tmp:
         with request(base+'/ui/connect/',token=False) as response:
             html=response.read().decode()
             assert response.status==200 and '<html' in html.lower()
+        with request(base+'/ui/third-party-notices/manifest.json',token=False) as response:
+            notice_manifest=json.load(response)
+        with request(base+'/ui/third-party-notices/node/LICENSE',token=False) as response:
+            assert hashlib.sha256(response.read()).hexdigest()==notice_manifest['files']['node/LICENSE']
         with request(base+'/openapi.json',token=False) as response:
             paths=json.load(response)['paths']
         assert any('oauth-user-credential' in path for path in paths), 'personal OAuth routes missing'
-        print('PASS: image startup, controlled chat completion, /ui/connect/, personal MCP OAuth route registration')
+        print('PASS: image startup, controlled chat completion, /ui/connect/, personal MCP OAuth route registration, downloadable notices')
         try:
             request(base+'/v1/mcp/user-credentials',token=False)
             raise AssertionError('unauthenticated personal credential listing unexpectedly allowed')
