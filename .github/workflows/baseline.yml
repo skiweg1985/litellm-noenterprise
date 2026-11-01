@@ -59,6 +59,8 @@ jobs:
         run: |
           python3 scripts/test_identity.py "$IMAGE" --oidc-settings --proxy-workers 2 --test-pattern test_oidc_settings.py
           python3 scripts/test_identity.py "$IMAGE" --oidc-settings --browser --browser-proxy-port 0
+      - name: Exercise OpenRouter image generation through the API and Playground
+        run: python3 scripts/test_openrouter_images.py "$IMAGE"
       - name: Exercise independent provider and subscription extensions
         run: python3 scripts/test_extensions.py "$IMAGE"
       - name: Exercise browser identity and provider-token API journeys

@@ -255,6 +255,7 @@ def image_generation(
             image_generation_config = ProviderConfigManager.get_provider_image_generation_config(
                 model=base_model or model,
                 provider=LlmProviders(custom_llm_provider),
+                api_base=api_base or litellm.api_base,
             )
 
         optional_params: Final = get_optional_params_image_gen(
