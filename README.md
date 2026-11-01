@@ -19,7 +19,7 @@ access, including mobile controls and reconnect guidance. See
 
 [Independent provider extensions](docs/extensions.md) add integrated ChatGPT
 subscription creation, naming, connection and retirement in the dashboard,
-model creation with a fixed subscription picker, per-attempt subscription logs,
+model creation with fixed subscriptions or ordered reserves, per-attempt subscription logs,
 quota monitoring, provider compatibility fixes,
 parallel streamed tool-call handling and an optional OpenRouter classifier.
 No subscription or external deployment is configured by default.

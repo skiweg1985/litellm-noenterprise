@@ -147,6 +147,15 @@ async def expand_candidates(router, candidates, request_kwargs=None):
         raise unavailable(
             "The assignment changed or its request timeout expired. Retry with the current model configuration."
         )
+    if policy is not None and request_kwargs is not None:
+        remaining = max(0.001, policy.deadline - time.monotonic())
+        for key in ("timeout", "request_timeout", "stream_timeout"):
+            supplied = request_kwargs.get(key)
+            request_kwargs[key] = (
+                min(supplied, remaining)
+                if isinstance(supplied, (int, float)) and supplied > 0
+                else remaining
+            )
     accounts = await asyncio.to_thread(Accounts)
     by_id = {a.status()["subscription_id"]: a for a in accounts}
     logging_obj = (request_kwargs or {}).get("litellm_logging_obj")
@@ -180,6 +189,7 @@ async def expand_candidates(router, candidates, request_kwargs=None):
             "parent": parent,
             "revision": assignment.revision,
             "subscription_id": identifier,
+            "member_id": model_id,
         }
         candidate["litellm_params"].update(
             api_key="chatgpt-account:" + account.name, litellm_credential_name=None
@@ -194,7 +204,13 @@ async def expand_candidates(router, candidates, request_kwargs=None):
     cooldowns = await router.cooldown_cache.async_get_active_cooldowns(
         model_ids=[d["model_info"]["id"] for d in result], parent_otel_span=None
     )
-    blocked = {entry[0] for entry in (cooldowns or [])}
+    # A credential rejection is tied to the token fingerprint above. A newly
+    # authorized generation recovers immediately instead of inheriting that 401.
+    blocked = {
+        entry[0]
+        for entry in (cooldowns or [])
+        if str(entry[1].get("status_code")) not in ("401", "403")
+    }
     result = [d for d in result if d["model_info"]["id"] not in blocked]
     if not result:
         raise unavailable()

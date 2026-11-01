@@ -8658,6 +8658,18 @@ class Router:
                 )
                 return False
 
+            member = _model_info.get("_subscription_member") if isinstance(_model_info, dict) else None
+            if member and ((_model_info.get("subscription_assignment") or {}).get("mode") in ("priority", "distribution")):
+                from litellm.proxy.extensions.chatgpt_subscriptions.policy import cooldown_seconds
+                if exception_status in (401, 403, 408, 429) or (isinstance(exception_status, int) and 500 <= exception_status < 600):
+                    self.cooldown_cache.add_deployment_to_cooldown(
+                        model_id=member["member_id"], original_exception=exception,
+                        exception_status=exception_status,
+                        cooldown_time=cooldown_seconds(self, member["parent"], exception),
+                    )
+                    return True
+                return False
+
             exception_headers: Final = litellm.litellm_core_utils.exception_mapping_utils._get_response_headers(
                 original_exception=exception
             )
