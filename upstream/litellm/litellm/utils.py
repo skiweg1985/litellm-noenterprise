@@ -9809,6 +9809,7 @@ class ProviderConfigManager:
     def get_provider_image_generation_config(
         model: str,
         provider: LlmProviders,
+        api_base: str | None = None,
     ) -> BaseImageGenerationConfig | None:
         if LlmProviders.OPENAI == provider:
             from litellm.llms.openai.image_generation import (
@@ -9899,7 +9900,7 @@ class ProviderConfigManager:
                 get_openrouter_image_generation_config,
             )
 
-            return get_openrouter_image_generation_config(model)
+            return get_openrouter_image_generation_config(model, api_base=api_base)
         elif provider in (
             LlmProviders.DASHSCOPE,
             LlmProviders.QWENCLOUD,
