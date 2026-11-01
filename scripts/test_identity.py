@@ -346,7 +346,7 @@ general_settings:
         print(result.stderr)
         if result.returncode:
             raise RuntimeError("identity acceptance tests failed")
-        if args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py"):
+        if args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py", "test_subscription_reserves.py", "test_subscription_distribution.py"):
             docker("restart", prefix + "-proxy")
             for _ in range(90):
                 ready = docker(
@@ -367,6 +367,10 @@ general_settings:
                 restart_tests.append("test_mcp.PersonalMCPTests.test_connection_survives_cold_restart")
             if args.test_pattern in ("test*.py", "test_subscription_models.py"):
                 restart_tests.append("test_subscription_models.SubscriptionModelTests.test_assignment_survives_restart")
+            if args.test_pattern in ("test*.py", "test_subscription_reserves.py"):
+                restart_tests.append("test_subscription_reserves.SubscriptionReserveTests.test_reserve_assignment_survives_restart")
+            if args.test_pattern in ("test*.py", "test_subscription_distribution.py"):
+                restart_tests.append("test_subscription_distribution.SubscriptionDistributionTests.test_distribution_assignment_survives_restart")
             for test in restart_tests:
                 persistence = docker(
                     "run", "--rm", "--network", prefix, *mount,
