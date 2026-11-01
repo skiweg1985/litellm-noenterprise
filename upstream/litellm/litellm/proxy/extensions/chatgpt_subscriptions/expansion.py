@@ -1,6 +1,7 @@
 """Expand one authoritative model into request-local native routing candidates."""
 
 import asyncio
+import time
 from copy import deepcopy
 from dataclasses import dataclass
 from uuid import NAMESPACE_URL, uuid5
@@ -19,6 +20,35 @@ def unavailable(
     return litellm.ServiceUnavailableError(
         message=message, model="subscription model", llm_provider="chatgpt"
     )
+
+
+async def hydrate_missing_parent(router, model):
+    """Make a newly saved managed parent usable on a sibling worker immediately."""
+    name = router.get_model_from_alias(model=model) or model
+    if name in router.model_names or router.get_deployment(model_id=name) is not None:
+        return
+    from litellm.proxy.proxy_server import prisma_client
+
+    if prisma_client is None:
+        return
+    rows = await prisma_client.db.litellm_proxymodeltable.find_many(
+        where={"OR": [{"model_name": name}, {"model_id": name}]}
+    )
+    from litellm.types.router import Deployment, LiteLLM_Params, ModelInfo
+
+    for row in rows:
+        info = row.model_info or {}
+        if not info.get(ASSIGNMENT):
+            continue
+        # Register only the parent, then let normal native team/auth routing
+        # select it. Ephemeral members never enter the public model inventory.
+        router.upsert_deployment(
+            Deployment(
+                model_name=row.model_name,
+                litellm_params=LiteLLM_Params(**_params(row.litellm_params)),
+                model_info=ModelInfo(**{**info, "id": row.model_id, "db_model": True}),
+            )
+        )
 
 
 async def current_parent(parent):
@@ -89,7 +119,8 @@ async def assert_dispatch_current(logging_obj):
     if (
         account is None
         or account.status()["retired"]
-        or account.status()["state"] in ("logged_out", "login_required")
+        or account.status()["state"]
+        in ("logged_out", "login_required", "credential_rejected")
     ):
         raise unavailable()
 
@@ -107,6 +138,15 @@ async def expand_candidates(router, candidates, request_kwargs=None):
     assignment = SubscriptionAssignment.model_validate(
         parent["model_info"].get(ASSIGNMENT)
     )
+    policy = getattr(
+        (request_kwargs or {}).get("litellm_logging_obj"), "_subscription_policy", None
+    )
+    if policy is not None and (
+        policy.revision != assignment.revision or time.monotonic() >= policy.deadline
+    ):
+        raise unavailable(
+            "The assignment changed or its request timeout expired. Retry with the current model configuration."
+        )
     accounts = await asyncio.to_thread(Accounts)
     by_id = {a.status()["subscription_id"]: a for a in accounts}
     logging_obj = (request_kwargs or {}).get("litellm_logging_obj")

@@ -100,6 +100,7 @@ class Account:
         now = self.clock()
         expiry = tokens.expires_at(record)
         valid = bool(record and record.get("access_token") and expiry and expiry > now + 60)
+        provider_rejected = bool(record and state.get("provider_rejected_fingerprint") and _fingerprint(record.get("access_token")) == state["provider_rejected_fingerprint"])
         refresh = (record or {}).get("refresh_token")
         rejected = bool(refresh) and _fingerprint(refresh) == state.get("rejected_refresh")
         pending = state.get("pending_identity") if (
@@ -109,7 +110,9 @@ class Account:
         login = state.get("login")
         if login and login.get("expires_at", 0) <= now:
             login = None
-        if login:
+        if provider_rejected:
+            current = "credential_rejected"
+        elif login:
             current = "login_pending"
         elif valid:
             current = "ok"
@@ -127,7 +130,7 @@ class Account:
             "account": self.name,
             "state": "retired" if retired else current,
             # A voluntary new sign-in can run while the current token still works.
-            "token_valid": valid and not retired,
+            "token_valid": valid and not retired and not provider_rejected,
             **tokens.identity(record if record and record.get("access_token") else None),
             "token_expires_at": expiry if record else None,
             "last_refresh_at": state.get("last_refresh_at"),

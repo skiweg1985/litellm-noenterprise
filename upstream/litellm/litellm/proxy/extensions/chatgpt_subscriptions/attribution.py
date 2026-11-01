@@ -23,6 +23,7 @@ class CredentialSnapshot:
     subscription_id: str
     display_name: str
     connection_revision: str | None
+    credential_fingerprint: str | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -71,6 +72,15 @@ def begin(logging_obj, credential, model):
     if not isinstance(credential, CredentialSnapshot):
         return None
     state = ledger(logging_obj)
+    logging_obj._subscription_credential_fingerprint = credential.credential_fingerprint
+    selection = getattr(logging_obj, "_subscription_selection", None)
+    routing_mode = (
+        selection.parent.get("model_info", {})
+        .get("subscription_assignment", {})
+        .get("mode")
+        if selection is not None
+        else None
+    )
     details = logging_obj.model_call_details
     params = details.get("litellm_params") or {}
     metadata = params.get("litellm_metadata") or params.get("metadata") or {}
@@ -83,7 +93,8 @@ def begin(logging_obj, credential, model):
         if previous is None
         else (
             "fallback"
-            if previous["subscription_id"] != credential.subscription_id
+            if routing_mode != "distribution"
+            and previous["subscription_id"] != credential.subscription_id
             else "retry"
         )
     )
@@ -100,6 +111,8 @@ def begin(logging_obj, credential, model):
         "ended_at": None,
         "outcome": "incomplete",
         "reason": reason,
+        "routing_mode": routing_mode,
+        "reserve_switch": routing_mode == "priority" and reason == "fallback",
         "input_tokens": None,
         "output_tokens": None,
     }
