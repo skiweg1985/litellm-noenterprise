@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import SSOSettings from "./SSOSettings";
@@ -70,13 +70,18 @@ it("saves a complete independent configuration from the native SSO tab without J
     </QueryClientProvider>,
   );
   await screen.findByRole("heading", { name: "OpenID Connect", exact: true });
-  await user.type(screen.getByLabelText("Issuer URL", { exact: true }), "https://id.example.test");
-  await user.type(screen.getByLabelText("Application ID", { exact: true }), "fixture-client");
-  await user.type(screen.getByLabelText("Client secret", { exact: true }), "fixture-write-only");
-  await user.clear(screen.getByLabelText("Callback URL", { exact: true }));
-  await user.type(screen.getByLabelText("Callback URL", { exact: true }), "https://gateway.example.test/oidc/callback");
-  await user.type(screen.getByLabelText("Admission attribute", { exact: true }), "roles");
-  await user.type(screen.getByLabelText("Admission allowed values", { exact: true }), "access");
+  fireEvent.change(screen.getByLabelText("Issuer URL", { exact: true }), {
+    target: { value: "https://id.example.test" },
+  });
+  fireEvent.change(screen.getByLabelText("Application ID", { exact: true }), { target: { value: "fixture-client" } });
+  fireEvent.change(screen.getByLabelText("Client secret", { exact: true }), {
+    target: { value: "fixture-write-only" },
+  });
+  fireEvent.change(screen.getByLabelText("Callback URL", { exact: true }), {
+    target: { value: "https://gateway.example.test/oidc/callback" },
+  });
+  fireEvent.change(screen.getByLabelText("Admission attribute", { exact: true }), { target: { value: "roles" } });
+  fireEvent.change(screen.getByLabelText("Admission allowed values", { exact: true }), { target: { value: "access" } });
   await user.click(screen.getByRole("button", { name: "Save changes", exact: true }));
   await waitFor(() => expect(requests.some((r) => r.method === "PUT")).toBe(true));
   const saved = requests.find((r) => r.method === "PUT")!;
