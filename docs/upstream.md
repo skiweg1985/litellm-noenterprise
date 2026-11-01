@@ -82,6 +82,30 @@ our pure-Python packaging metadata, leaving the optional native Rust extension
 out. The Prisma client, CLI, and engines are generated at build time. Runtime
 uses an unprivileged user and the cached Prisma CLI.
 
+The image retains Node's complete license and third-party notices plus a
+conservative collection from installed dashboard npm packages. These documents
+are available under `/usr/share/licenses/litellm-noenterprise` and at
+`/ui/third-party-notices/manifest.json` with source-relative document links.
+The manifest records package identities, declared licenses, authors, and document
+checksums. Collection includes build-only packages; it does not imply their code
+is shipped. Only notice documents and metadata are copied, not dashboard
+`node_modules` or npm build tooling. Python distribution and Prisma notices are
+retained with their installed packages.
+
+Pinned supplements in `runtime/licenses` retain source-release license files
+omitted from the published Heroicons and Next.js ESLint packages. Additional
+upstream MIT documents for `format` and `toggle-selection` are marked as later
+supplements, alongside the original package declarations and README attribution.
+The standard CC0-1.0 text accompanies the original `highlightjs-vue` declaration;
+its later upstream license differs and is not applied to this package. These
+supplements are not presented as files from those package releases.
+Packages with only a README or no notice are explicitly marked for review. The `client-only` marker
+package publishes an empty default browser export and an MIT declaration but no
+notice document; no license text is invented for it. The collection is evidence
+for notice retention, not a certification of all dependency license obligations.
+The image audit verifies document hashes, and the smoke check downloads a notice
+through the running UI. Running all baseline command tests also requires Node.js.
+
 `runtime/requirements.in` is generated from the reviewed upstream core, proxy,
 and extra-proxy dependency lists, excluding the two locally built packages.
 After dependency changes, regenerate and review the lock:
@@ -108,7 +132,7 @@ stages. Do not replace the base with an upstream LiteLLM image.
 Validation on 2026-11-01 used an ARM64 Docker host and the image built from this
 branch. The image startup and controlled chat request passed. The rebuilt
 personal connection page and OAuth routes were present, and anonymous personal
-credential access was denied. The image audit inspected all 12 final image
+credential access was denied. The image audit inspected all final image
 layers, confirmed no enterprise distribution was installed, and checked retained
 UI/audio assets. No live identity-provider or authenticated personal MCP flow is
 claimed by these checks.

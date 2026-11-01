@@ -10,6 +10,9 @@ COPY upstream/litellm/ui/litellm-dashboard/package*.json ./
 RUN npm ci --no-audit --no-fund
 COPY upstream/litellm/ui/litellm-dashboard/ ./
 RUN npm run build
+COPY scripts/collect_license_notices.mjs /build-tools/collect_license_notices.mjs
+COPY runtime/licenses/ /build-tools/licenses/
+RUN node /build-tools/collect_license_notices.mjs --node-modules /ui/node_modules --node-license /usr/local/LICENSE --output /ui/out/third-party-notices --supplements /build-tools/licenses/supplements.json
 
 FROM ${PYTHON_IMAGE} AS base
 RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 libstdc++6 openssl libsndfile1 && rm -rf /var/lib/apt/lists/*
@@ -39,6 +42,7 @@ COPY --from=build /opt/venv /opt/venv
 COPY --from=build /opt/prisma /opt/prisma
 COPY --from=build /app/schema.prisma /app/schema.prisma
 COPY upstream/litellm/LICENSE /usr/share/licenses/litellm/LICENSE
+COPY --from=ui /ui/out/third-party-notices/ /usr/share/licenses/litellm-noenterprise/
 ENV PATH=/opt/venv/bin:$PATH PRISMA_BINARY_CACHE_DIR=/opt/prisma PRISMA_USE_GLOBAL_NODE=1 \
     PRISMA_CLI_PATH=/opt/prisma/node_modules/.bin/prisma PRISMA_OFFLINE_MODE=true \
     LITELLM_LOCAL_MODEL_COST_MAP=True LITELLM_TELEMETRY=False PYTHONDONTWRITEBYTECODE=1

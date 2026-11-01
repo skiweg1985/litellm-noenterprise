@@ -1,0 +1,40 @@
+{
+  "@heroicons/react@1.0.6": [
+    {
+      "file": "heroicons/LICENSE",
+      "source": "https://raw.githubusercontent.com/tailwindlabs/heroicons/71b15b9e72e0211c5dbb28fb75f280deedaec28d/LICENSE",
+      "sha256": "75523ddd65d9620bea09f84e89d0c373b4205a3708b8a1e9f9598a5438a3e641"
+    }
+  ],
+  "eslint-config-next@16.3.3": [
+    {
+      "file": "nextjs/license.md",
+      "source": "https://raw.githubusercontent.com/vercel/next.js/a9a1cb7859f178f830ad3773b303130c21b19586/license.md",
+      "sha256": "ee765244e2d59f5234d474f62e0766fa0c8b99af967fdd4c0cb8dcb0c76ea224"
+    }
+  ],
+  "format@0.2.2": [
+    {
+      "file": "format/License.md",
+      "source": "https://raw.githubusercontent.com/samsonjs/format/91b6bd78af9b061c90010b86d83caa051edeb1ea/License.md",
+      "sha256": "0b2c94863590ca2aed327e89642b7e74b1608ec423bfec1d8f1beba2945fc4ba",
+      "basis": "Supplemental upstream license document added after the published package revision. The original package license declaration and README attribution are also retained; this is not represented as a document shipped in that package."
+    }
+  ],
+  "toggle-selection@1.0.6": [
+    {
+      "file": "toggle-selection/LICENSE",
+      "source": "https://raw.githubusercontent.com/sudodoki/toggle-selection/538dc4e9de40b8aee41f1e9066a4c5de3f4adc0a/LICENSE",
+      "sha256": "771e50e27b24269923639e8e0cc650e7187ffeab5726f6a6f47d9ea83865089d",
+      "basis": "Supplemental upstream license document added after the published package revision. The original package license declaration and README attribution are also retained; this is not represented as a document shipped in that package."
+    }
+  ],
+  "highlightjs-vue@1.0.0": [
+    {
+      "file": "highlightjs-vue/CC0-1.0.txt",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/text/CC0-1.0.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+      "basis": "Standard CC0-1.0 legal text corresponding to the original npm package declaration and README. Not a license document shipped in that package; later upstream releases use a different license."
+    }
+  ]
+}
