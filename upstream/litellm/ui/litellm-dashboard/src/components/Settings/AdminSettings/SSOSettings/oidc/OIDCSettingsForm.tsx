@@ -116,6 +116,7 @@ export function OIDCSettingsForm({
   }
   let status = "OpenID Connect is disabled. Saving enables it.";
   if (settings.source === "unset") status = "OpenID Connect is not configured. Saving enables it.";
+  if (settings.read_only) status = "OpenID Connect is disabled in the deployment configuration.";
   if (settings.enabled) status = "OpenID Connect is active.";
   const sources = { file: "deployment file", database: "saved in LiteLLM", unset: "not configured" };
   return (
