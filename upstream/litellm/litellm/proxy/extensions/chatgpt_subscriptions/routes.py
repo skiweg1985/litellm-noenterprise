@@ -8,7 +8,7 @@ import secrets
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from . import admin
+from . import admin, observed_usage
 from .accounts import Accounts
 from .prtg import login_text, render
 from .service import ModelsService, MonitoringError, UsageService
@@ -16,7 +16,7 @@ from .service import ModelsService, MonitoringError, UsageService
 OVERVIEW = "/chatgpt/accounts"
 PREFIX = OVERVIEW + "/{name}/usage"
 UNKNOWN = "Unknown ChatGPT account."
-PATHS = (OVERVIEW, PREFIX, PREFIX + "/prtg", admin.PAGE, admin.API)
+PATHS = (OVERVIEW, PREFIX, PREFIX + "/prtg", admin.PAGE, admin.API, observed_usage.API)
 # Fields of an account that the monitoring key may see: no email, no ids.
 OVERVIEW_FIELDS = ("account", "state", "token_valid", "plan", "token_expires_at",
                    "last_refresh_at", "refresh_rejected", "auto_login")
@@ -148,6 +148,7 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
         return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
     app.include_router(router)
+    app.include_router(observed_usage.router(accounts, admin_dependency))
     for part in admin.router(accounts, services, admin_dependency, deployments=deployments, catalogs=catalogs):
         app.include_router(part)
     if watch:

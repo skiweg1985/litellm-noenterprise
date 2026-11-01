@@ -320,6 +320,8 @@ general_settings:
             prefix,
             *mount,
             "-e",
+            "DATABASE_URL=" + database,
+            "-e",
             "EXPECTED_API_SCOPE=" + args.api_scope_name,
             "-e",
             "SUBSCRIPTION_CAPACITY_CHECKS=" + str(args.test_pattern == "test_subscription_capacity.py").lower(),

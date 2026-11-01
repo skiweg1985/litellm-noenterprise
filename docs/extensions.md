@@ -143,6 +143,43 @@ unknown, including interrupted streams; no token estimate is presented as observ
 subscription usage. Names and connection revisions are historical snapshots and
 do not expose provider account identifiers or credentials.
 
+## Compare observed subscription usage
+
+Open **Observed usage** from subscription management, or use the link on an
+individual subscription. Choose **From (UTC)** and **Through (UTC, inclusive)**,
+then **Apply period**. **View logs** keeps the subscription and exact time range;
+**Connection history** separates observations by connection revision. Renamed and
+retired subscriptions retain their recorded names and revisions.
+
+The metrics come from retained request logs, independently of current model
+assignments. Logical requests count distinct gateway-generated request IDs per
+subscription. Provider attempts count distinct attempt IDs within those logical
+requests. Failed attempts count the failure outcome; cancellation and incomplete
+attempts remain visible in logs. Reserve switches count actual attempts reached
+through ordered reserve routing, on the destination subscription. Distribution
+retries are not reserve switches. A logical request may use several subscriptions,
+so per-subscription request counts cannot be added to obtain a gateway total.
+
+Token sums include only recorded usage and show the number of attempts without
+usage. If no value was recorded, the total is **Unknown**. A partial sum is labeled
+**recorded**, not presented as a complete total. These observations do not estimate
+provider quota, reset windows or per-request subscription fees.
+
+Aggregation runs in the database over the same inclusive, second-precision UTC
+request-start window used by the log link. Duplicate callback snapshots count each
+attempt once, preferring a terminal snapshot over an incomplete one; raw log rows
+can therefore outnumber logical requests. Cache hits never create provider usage.
+The coverage panel separately reports unattributed ChatGPT records and records
+whose provider is unknown. Neither is assigned by parsing a model name. Known
+other providers are excluded from these gap counts. The oldest retained log is
+shown, but complete historical coverage remains unknown: deleted or unlogged
+requests cannot be reconstructed.
+
+The overview uses the existing native-admin/dashboard-session boundary. It exposes
+no provider identities or credentials. Its generated API types are refreshed with
+`npm run gen:api -- --subscription-usage` in the dashboard directory and the same
+backend Python environment used for the other scoped contracts.
+
 ## Monitor subscriptions
 
 Monitoring is disabled unless `CHATGPT_MONITORING_API_KEY` is configured.
