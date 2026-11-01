@@ -1,10 +1,13 @@
 """Strict synthetic OpenRouter Image API; never forwards external requests."""
+import base64
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # Valid 1x1 PNG used to assert browser decoding, not just an <img> element.
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
 JPEG = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAACAAIDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDi6KKK+ZP3E//Z'
+SVG = base64.b64encode(b'<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="blue"/></svg>').decode()
+IMAGES = {"png": (PNG, "image/png"), "jpeg": (JPEG, "image/jpeg"), "svg": (SVG, "image/svg+xml")}
 seen = []
 
 
@@ -38,9 +41,10 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(400, {"error": {"message": "Expected native image model and prompt request"}})
             return
         seen.append({"path": self.path, "body": body, "named_credential_used": True})
+        image, media_type = IMAGES.get(body["prompt"].rsplit(" ", 1)[-1], IMAGES["png"])
         self.respond(200, {
             "id": "fixture-image-generation", "model": body["model"],
-            "data": [{"b64_json": JPEG if body["prompt"].endswith("jpeg") else PNG, "media_type": "image/jpeg" if body["prompt"].endswith("jpeg") else "image/png"}],
+            "data": [{"b64_json": image, "media_type": media_type}],
             "usage": {"prompt_tokens": 7, "completion_tokens": 11, "total_tokens": 18, "cost": 0.0123},
         })
 

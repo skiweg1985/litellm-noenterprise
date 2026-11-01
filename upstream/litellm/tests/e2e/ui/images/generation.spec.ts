@@ -15,7 +15,7 @@ test("public image API resolves a named credential and preserves image data and 
   expect(Number(response.headers()["x-litellm-response-cost"])).toBe(0.0123);
 });
 
-for (const format of ["png", "jpeg"] as const) {
+for (const format of ["png", "jpeg", "svg"] as const) {
   test(`Playground displays a decoded ${format} image returned through the native OpenRouter Image API`, async ({ page }) => {
     const login = await page.request.post("/login", {
       form: { username: "admin", password: "fixture-dashboard-only" },
@@ -33,7 +33,8 @@ for (const format of ["png", "jpeg"] as const) {
     expect((await response).status()).toBe(200);
     const generated = page.getByRole("img", { name: "Generated image", exact: true });
     await expect(generated).toBeVisible();
-    await expect(generated).toHaveAttribute("src", new RegExp(`^data:image/${format};base64,`));
+    const mediaType = format === "svg" ? "svg\\+xml" : format;
+    await expect(generated).toHaveAttribute("src", new RegExp(`^data:image/${mediaType};base64,`));
     await expect.poll(() => generated.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth)).toBe(format === "png" ? 1 : 2);
   });
 }
