@@ -65,6 +65,10 @@ with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
       model: openai/gpt-4o-mini
       api_key: fixture-unused
       mock_response: fixture completion
+  - model_name: fixture-subscription-config
+    litellm_params:
+      model: chatgpt/gpt-5.4
+      api_key: chatgpt-account:default
 mcp_servers:
   fixture:
     url: http://mcp-upstream:8090/mcp

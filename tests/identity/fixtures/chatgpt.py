@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 
 app = FastAPI()
-state = {"identity": "seat-a", "catalog_error": False, "status": 200, "seen": [], "statuses": [], "stream_error": False, "stream_error_at": 3, "delay": 0, "status_by_identity": {}, "retry_after_by_identity": {}, "models_by_identity": {}, "active": 0, "peak_active": 0, "requests": []}
+state = {"identity": "seat-a", "catalog_error": False, "catalog_delay": 0, "status": 200, "seen": [], "statuses": [], "stream_error": False, "stream_error_at": 3, "delay": 0, "status_by_identity": {}, "retry_after_by_identity": {}, "models_by_identity": {}, "active": 0, "peak_active": 0, "requests": []}
 codes = {}
 fixtures = json.loads((Path(__file__).parents[2] / "deployment_patches/fixtures/chatgpt_sse.json").read_text())
 
@@ -23,7 +23,7 @@ def jwt(identity):
 @app.post('/control')
 async def control(request: Request):
     changes = await request.json()
-    for key in ('identity', 'catalog_error', 'status', 'statuses', 'stream_error', 'stream_error_at', 'delay', 'status_by_identity', 'retry_after_by_identity', 'models_by_identity'):
+    for key in ('identity', 'catalog_error', 'catalog_delay', 'status', 'statuses', 'stream_error', 'stream_error_at', 'delay', 'status_by_identity', 'retry_after_by_identity', 'models_by_identity'):
         if key in changes:
             state[key] = changes[key]
     if changes.get('clear'):
@@ -60,6 +60,7 @@ async def token(request: Request):
 
 @app.get('/models')
 async def models(request: Request):
+    await asyncio.sleep(state['catalog_delay'])
     if state['catalog_error']:
         return JSONResponse({"error": "Synthetic catalog unavailable"}, status_code=503)
     slugs = state['models_by_identity'].get(request.headers.get('chatgpt-account-id'), ['gpt-5.4'])

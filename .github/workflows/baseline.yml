@@ -62,6 +62,7 @@ jobs:
           python3 scripts/test_identity.py "$IMAGE" --proxy-workers 2 --test-pattern test_subscription_reserves.py
           python3 scripts/test_identity.py "$IMAGE" --test-pattern test_subscription_capacity.py
           python3 scripts/test_identity.py "$IMAGE" --proxy-workers 2 --test-pattern test_subscription_conversion.py
+          python3 scripts/test_identity.py "$IMAGE" --proxy-workers 2 --test-pattern test_subscription_bulk.py
       - name: Install pinned browser test dependencies
         run: |
           npm ci --prefix upstream/litellm/tests/e2e/ui --ignore-scripts --no-audit --no-fund

@@ -8,7 +8,7 @@ import secrets
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from . import admin, observed_usage
+from . import admin, bulk_assignment, observed_usage
 from .accounts import Accounts
 from .prtg import login_text, render
 from .service import ModelsService, MonitoringError, UsageService
@@ -149,6 +149,7 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
 
     app.include_router(router)
     app.include_router(observed_usage.router(accounts, admin_dependency))
+    app.include_router(bulk_assignment.router(accounts, admin_dependency))
     for part in admin.router(accounts, services, admin_dependency, deployments=deployments, catalogs=catalogs):
         app.include_router(part)
     if watch:

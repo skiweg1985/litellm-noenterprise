@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { SubscriptionBulkAssignment } from "@/components/subscriptions/SubscriptionBulkAssignment";
 import { subscriptionLogsLink } from "@/components/logs/request/subscriptionLogRouting";
 import { subscriptionModelHref } from "@/components/subscriptions/modelPrefill";
 import { useState } from "react";
@@ -337,11 +338,13 @@ function AccountCard({
   busy,
   act,
   rename,
+  assign,
 }: {
   account: SubscriptionAccount;
   busy: boolean;
   act: (request: ActionRequest) => void;
   rename: (account: SubscriptionAccount) => void;
+  assign?: (account: SubscriptionAccount) => void;
 }) {
   const quota = account.quota?.limits.find((group) => group.id === "codex");
   const request: RequestAction = (steps, title, description) => {
@@ -427,6 +430,16 @@ function AccountCard({
       <CardContent className="space-y-5">
         {!account.retired && (
           <>
+            {account.token_valid && assign && (
+              <section className="space-y-2 rounded-md border p-3" aria-label="Optional model assignment">
+                <p className="text-sm">
+                  Optionally add this subscription to existing models. Review every change before saving.
+                </p>
+                <Button variant="outline" disabled={busy} onClick={() => assign(account)}>
+                  Assign to models
+                </Button>
+              </section>
+            )}
             <DeviceSignIn account={account} busy={busy} />
             <PendingAccount account={account} busy={busy} request={request} />
           </>
@@ -437,7 +450,14 @@ function AccountCard({
           </p>
         )}
         <AccountDetails account={account} />
-        <Link className="text-sm text-primary underline" href={subscriptionLogsLink(uiHref("chatgpt-subscriptions/usage/"), { subscription_id: account.subscription_id })}>Observed usage for {subscriptionName(account)}</Link>
+        <Link
+          className="text-sm text-primary underline"
+          href={subscriptionLogsLink(uiHref("chatgpt-subscriptions/usage/"), {
+            subscription_id: account.subscription_id,
+          })}
+        >
+          Observed usage for {subscriptionName(account)}
+        </Link>
         {!account.retired && <SubscriptionModels account={account} />}
       </CardContent>
     </Card>
@@ -566,6 +586,7 @@ function Subscriptions({ accessToken, userId }: { accessToken: string; userId: s
   const [confirmation, setConfirmation] = useState<ActionRequest | null>(null);
   const [nameDialog, setNameDialog] = useState<{ account?: SubscriptionAccount } | null>(null);
   const [displayName, setDisplayName] = useState("");
+  const [bulkAccount, setBulkAccount] = useState<SubscriptionAccount | null>(null);
   const nameOptions: UseMutationOptions<
     SubscriptionAccount,
     Error,
@@ -634,7 +655,9 @@ function Subscriptions({ accessToken, userId }: { accessToken: string; userId: s
           <p className="mt-1 text-sm text-muted-foreground">Manage the subscription accounts used by this gateway.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link className="self-center text-sm text-primary underline" href={uiHref("chatgpt-subscriptions/usage/")}>Observed usage</Link>
+          <Link className="self-center text-sm text-primary underline" href={uiHref("chatgpt-subscriptions/usage/")}>
+            Observed usage
+          </Link>
           <Button disabled={unavailable || busy} onClick={() => openNameDialog()}>
             Add subscription
           </Button>
@@ -683,10 +706,21 @@ function Subscriptions({ accessToken, userId }: { accessToken: string; userId: s
                 busy={busy || query.isFetching || query.isError}
                 act={act}
                 rename={openNameDialog}
+                assign={setBulkAccount}
               />
             ))}
           <RetiredSubscriptions accounts={query.data.accounts} act={act} rename={openNameDialog} />
         </>
+      )}
+      {bulkAccount && (
+        <SubscriptionBulkAssignment
+          accessToken={accessToken}
+          account={bulkAccount.account}
+          onClose={() => setBulkAccount(null)}
+          onSaved={() => {
+            void queryClient.invalidateQueries({ queryKey: key });
+          }}
+        />
       )}
       <SubscriptionNameDialog
         nameDialog={nameDialog}
