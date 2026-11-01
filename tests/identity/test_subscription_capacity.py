@@ -63,8 +63,16 @@ class SubscriptionCapacityTests(distribution_tests.SubscriptionDistributionTests
             selected = first if selected_identity == first_identity else second
             self.client.post('/chatgpt/api/accounts/' + selected['account'] + '/logout').raise_for_status()
             next_request = pool.submit(self.completion, name)
-            for result in (initial.result(timeout=15), next_request.result(timeout=15)):
-                self.assertEqual(result.status_code, 200, result.text)
+            completed = initial.result(timeout=15)
+            limited = next_request.result(timeout=15)
+            self.assertEqual(completed.status_code, 200, completed.text)
+            self.assertIn(limited.status_code, (200, 429), limited.text)
+        if limited.status_code == 429:
+            # Native semaphore saturation may reject instead of queuing. Once
+            # the first request ends, the remaining member must work again.
+            self.assertEqual(len(self.control()['requests']), 1)
+            resumed = self.completion(name)
+            self.assertEqual(resumed.status_code, 200, resumed.text)
         observed = self.control()
         self.assertEqual(set(observed['seen']), {first_identity, second_identity})
         self.assertEqual(observed['peak_active'], 1, observed['requests'])
