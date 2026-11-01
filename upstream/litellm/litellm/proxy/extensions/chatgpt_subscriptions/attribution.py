@@ -4,6 +4,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from litellm.types.proxy.subscription_attribution import (
+    SubscriptionAttemptRecord,
+    SubscriptionAttributionMetadata,
+)
+
 FIELDS = frozenset(
     {"subscription_logical_id", "subscription_ids", "subscription_attempts"}
 )
@@ -22,7 +27,7 @@ class CredentialSnapshot:
 
 @dataclass
 class Attempt:
-    value: dict
+    value: SubscriptionAttemptRecord
 
     def finish(self, outcome, response=None, error=None):
         if self.value.get("ended_at") is not None:
@@ -82,7 +87,7 @@ def begin(logging_obj, credential, model):
             else "retry"
         )
     )
-    value = {
+    value: SubscriptionAttemptRecord = {
         "attempt_id": str(uuid4()),
         "sequence": len(state.attempts) + 1,
         "subscription_id": credential.subscription_id,
@@ -102,7 +107,7 @@ def begin(logging_obj, credential, model):
     return attempt
 
 
-def snapshot(logging_obj):
+def snapshot(logging_obj) -> SubscriptionAttributionMetadata:
     state = getattr(logging_obj, "_chatgpt_subscription_ledger", None)
     if not isinstance(state, Ledger) or not state.attempts:
         return {}

@@ -143,3 +143,13 @@ python3 scripts/test_identity.py litellm-noenterprise:1.106.6
 Extension checks run installed code with synthetic accounts and local mock
 services. They require no real subscription, deployment credentials or external
 provider requests. They do not establish live provider compatibility.
+
+The log UI uses the generated filter and attempt types in
+`subscription-logs-schema.d.ts`. Regenerate them with
+`npm run gen:api -- --subscription-logs` in the dashboard directory and a Python
+environment containing the current backend. The scoped export reads the actual
+`/spend/logs/ui` route and the backend `SubscriptionAttributionMetadata` type.
+The native route still describes Prisma metadata as generic JSON; the separate
+attribution component documents its reserved fields without changing legacy
+SpendLogs serialization. The UI defensively reads older or incomplete metadata
+and retains its existing pagination response handling.

@@ -1,20 +1,11 @@
+import type { components } from "@/lib/http/subscription-logs-schema";
 import type { LogEntry } from "./types";
 
-export interface SubscriptionAttempt {
-  attempt_id: string;
-  sequence: number;
-  subscription_id: string;
-  display_name: string;
-  connection_revision: string | null;
-  model: string | null;
-  model_id: string | null;
-  started_at: string | null;
-  ended_at: string | null;
-  outcome: string;
-  reason: string;
-  input_tokens: number | null;
-  output_tokens: number | null;
-}
+// Unknown/legacy stored JSON still passes through the defensive reader below.
+export type SubscriptionAttempt = Omit<
+  components["schemas"]["SubscriptionAttemptRecord"],
+  "outcome" | "reason"
+> & { outcome: string; reason: string };
 
 const text = (value: unknown): string | null => (typeof value === "string" && value !== "" ? value : null);
 const tokens = (value: unknown): number | null =>
