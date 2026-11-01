@@ -381,5 +381,5 @@ general_settings:
         raise
     finally:
         for name in reversed(containers):
-            docker("rm", "-f", name, check=False)
+            docker("rm", "-f", "-v", name, check=False)
         docker("network", "rm", prefix, check=False)

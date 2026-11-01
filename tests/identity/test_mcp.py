@@ -52,7 +52,13 @@ class PersonalMCPTests(unittest.TestCase):
             self.assertEqual(status.status_code, 403, status.text)
 
     def connect(
-        self, headers, server="managed_a", actor="alice", expires_in=3600, refresh=True
+        self,
+        headers,
+        server="managed_a",
+        actor="alice",
+        expires_in=3600,
+        refresh=True,
+        omit_expires_in=False,
     ):
         httpx.post(
             "http://mcp-upstream:8090/control/oauth",
@@ -63,6 +69,8 @@ class PersonalMCPTests(unittest.TestCase):
                 "fail_refresh": False,
                 "pause_refresh": False,
                 "refresh_unavailable": False,
+                "omit_expires_in": omit_expires_in,
+                "reject_actor": None,
             },
             trust_env=False,
         ).raise_for_status()
@@ -700,3 +708,63 @@ class PersonalMCPTests(unittest.TestCase):
         )
         self.assertEqual(result.status_code, 400, result.text)
         self.assertIn("oauth_client_required", result.text)
+
+    def test_upstream_access_expiry_without_metadata_refreshes_once_without_reconnect(
+        self,
+    ):
+        headers = self.headers(user="resource-expiry-user")
+        actor = "resource-expiry-actor"
+        code, verifier = self.connect(headers, actor=actor, omit_expires_in=True)
+        self.assertEqual(self.exchange(headers, code, verifier).status_code, 200)
+        payload = {"server_id": "managed_a", "name": "whoami", "arguments": {}}
+        initial = self.client.post(
+            "/mcp-rest/tools/call", headers=headers, json=payload
+        )
+        self.assertEqual(initial.status_code, 200, initial.text)
+        self.assertIn(actor, initial.text)
+        httpx.post(
+            "http://mcp-upstream:8090/control/expire-access",
+            json={"actor": actor},
+            trust_env=False,
+        ).raise_for_status()
+        recovered = self.client.post(
+            "/mcp-rest/tools/call", headers=headers, json=payload
+        )
+        self.assertEqual(recovered.status_code, 200, recovered.text)
+        self.assertIn(actor, recovered.text)
+        status = self.client.get(
+            "/v1/mcp/server/managed_a/oauth-user-credential/status", headers=headers
+        )
+        self.assertEqual(status.json()["connection_status"], "connected")
+        self.assertTrue(status.json()["can_refresh"])
+        events = httpx.get(
+            "http://mcp-upstream:8090/oauth/events", trust_env=False
+        ).json()
+        self.assertEqual(
+            sum(
+                e.get("event") == "refresh" and e.get("actor") == actor for e in events
+            ),
+            1,
+        )
+
+        # A newly renewed token can also be rejected; do not loop or use another grant.
+        httpx.post(
+            "http://mcp-upstream:8090/control/oauth",
+            json={"reject_actor": actor},
+            trust_env=False,
+        ).raise_for_status()
+        denied = self.client.post("/mcp-rest/tools/call", headers=headers, json=payload)
+        self.assertNotIn(actor, denied.text)
+        status = self.client.get(
+            "/v1/mcp/server/managed_a/oauth-user-credential/status", headers=headers
+        )
+        self.assertEqual(status.json()["connection_status"], "reconnect_required")
+        events = httpx.get(
+            "http://mcp-upstream:8090/oauth/events", trust_env=False
+        ).json()
+        self.assertEqual(
+            sum(
+                e.get("event") == "refresh" and e.get("actor") == actor for e in events
+            ),
+            2,
+        )

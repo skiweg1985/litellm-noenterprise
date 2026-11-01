@@ -28,6 +28,7 @@ from litellm.proxy._types import (
     MCPApprovalStatus,
     MCPEnvVar,
     MCPEnvVarScope,
+    MCPOAuthUserCredentialStatus,
     MCPServerUserCredentialListItem,
     MCPSubmissionsSummary,
     NewMCPServerRequest,
@@ -1859,6 +1860,24 @@ async def mark_user_oauth_reconnect(
     )
 
 
+async def expire_rejected_user_oauth_token(
+    prisma_client: PrismaClient, user_id: str, server_id: str, access_token: str,
+) -> None:
+    """Expire only the rejected grant so the existing coordinated store can renew it."""
+    row = await _db_find_user_credential_row(prisma_client, user_id, server_id)
+    credential = decode_oauth_payload(row.credential_b64) if row else None
+    if not credential or credential.get("access_token") != access_token:
+        return
+    if credential.get("refresh_token"):
+        credential["expires_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        credential["reconnect_required"] = True
+    await _user_credential_actions(prisma_client).update_many(
+        where={"user_id": user_id, "server_id": server_id, "credential_b64": row.credential_b64},
+        data={"credential_b64": encrypt_value_helper(json.dumps(credential))},
+    )
+
+
 def is_oauth_credential_expired(cred: OAuthCredentialPayload, buffer_seconds: int = 0) -> bool:
     """Return True if the OAuth2 credential's access_token has expired.
 
@@ -1887,6 +1906,42 @@ def oauth_grant_state(cred: OAuthCredentialPayload | None) -> OAuthGrantState:
     if not is_oauth_credential_expired(cred, buffer_seconds=MCP_PER_USER_TOKEN_EXPIRY_BUFFER_SECONDS):
         return "valid"
     return "refreshable" if cred.get("refresh_token") else "absent"
+
+
+async def get_user_oauth_credential_status(
+    prisma_client: PrismaClient, user_id: str, server: "MCPServer"
+) -> MCPOAuthUserCredentialStatus:
+    if server.needs_user_oauth_token and not server.client_id:
+        return MCPOAuthUserCredentialStatus(
+            server_id=server.server_id,
+            has_credential=False,
+            connection_mode="managed",
+            connection_status="unavailable",
+            configuration_error="oauth_client_required",
+        )
+    cred = await get_user_oauth_credential(prisma_client, user_id, server.server_id)
+    expired = bool(cred and is_oauth_credential_expired(cred))
+    can_refresh = bool(
+        cred and cred.get("refresh_token") and not cred.get("reconnect_required")
+    )
+    return MCPOAuthUserCredentialStatus(
+        server_id=server.server_id,
+        connection_mode="managed"
+        if server.needs_user_oauth_token
+        else "client_supplied",
+        has_credential=bool(cred),
+        expires_at=cred.get("expires_at") if cred else None,
+        connected_at=cred.get("connected_at") if cred else None,
+        is_expired=expired,
+        can_refresh=can_refresh,
+        connection_status="disconnected"
+        if not cred
+        else (
+            "reconnect_required"
+            if cred.get("reconnect_required") or (expired and not can_refresh)
+            else "connected"
+        ),
+    )
 
 
 async def get_user_oauth_credential(

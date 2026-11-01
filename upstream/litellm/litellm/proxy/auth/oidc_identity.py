@@ -315,6 +315,23 @@ async def discovery(config: OIDCSettings, client: httpx.AsyncClient) -> dict[str
     return metadata
 
 
+async def load_signing_key(
+    client: httpx.AsyncClient, jwks_uri: str, header: dict[str, Any], algorithm: str
+) -> jwt.PyJWK:
+    response = await client.get(jwks_uri)
+    response.raise_for_status()
+    matches = [
+        key
+        for key in response.json()["keys"]
+        if key.get("kid") == header.get("kid")
+        and key.get("use", "sig") == "sig"
+        and key.get("alg", algorithm) == algorithm
+    ]
+    if len(matches) != 1:
+        raise ValueError("ambiguous or missing signing key")
+    return jwt.PyJWK.from_dict(matches[0], algorithm=algorithm)
+
+
 async def verify_id_token(
     config: OIDCSettings, client: httpx.AsyncClient, metadata: dict[str, Any], encoded: str, nonce: str
 ) -> dict[str, Any]:
@@ -325,21 +342,10 @@ async def verify_id_token(
             "id_token_signing_alg_values_supported", ["RS256"]
         ):
             raise ValueError("unsupported signing algorithm")
-        response = await client.get(metadata["jwks_uri"])
-        response.raise_for_status()
-        matches = [
-            key
-            for key in response.json()["keys"]
-            if key.get("kid") == header.get("kid")
-            and key.get("use", "sig") == "sig"
-            and key.get("alg", algorithm) == algorithm
-        ]
-        if len(matches) != 1:
-            raise ValueError("ambiguous or missing signing key")
-        key = jwt.PyJWK.from_dict(matches[0], algorithm=algorithm).key
+        key = await load_signing_key(client, metadata["jwks_uri"], header, algorithm)
         claims = jwt.decode(
             encoded,
-            key,
+            key.key,
             algorithms=[algorithm],
             audience=config.client_id,
             issuer=config.issuer,

@@ -42,10 +42,16 @@ class StaticHeaderAuth(httpx2.Auth):
 
 
 class PersonalOAuthAuth(httpx2.Auth):
-    """Record upstream rejection of the exact personal bearer used for this request."""
+    """Renew a rejected personal grant once; never loop on an upstream rejection."""
 
-    def __init__(self, inner: StaticHeaderAuth, rejected: Callable[[str], Awaitable[None]]) -> None:
+    def __init__(
+        self,
+        inner: StaticHeaderAuth,
+        recover: Callable[[str], Awaitable[StaticHeaderAuth | None]],
+        rejected: Callable[[str], Awaitable[None]],
+    ) -> None:
         self._inner = inner
+        self._recover = recover
         self._rejected = rejected
         self.header_name = inner.header_name
 
@@ -54,7 +60,20 @@ class PersonalOAuthAuth(httpx2.Auth):
         try:
             outbound = await anext(flow)
             response = yield outbound
-            if response.status_code == 401:
-                await self._rejected(outbound.headers[self.header_name])
+            if response.status_code != 401:
+                return
+            refreshed = await self._recover(outbound.headers[self.header_name])
+            if refreshed is None:
+                return
+            await response.aread()
+            self._inner = refreshed
+            retry_flow = refreshed.async_auth_flow(request)
+            try:
+                retry = await anext(retry_flow)
+                response = yield retry
+                if response.status_code == 401:
+                    await self._rejected(retry.headers[self.header_name])
+            finally:
+                await retry_flow.aclose()
         finally:
             await flow.aclose()

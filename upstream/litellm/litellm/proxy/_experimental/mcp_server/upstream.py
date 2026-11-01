@@ -120,18 +120,44 @@ async def resolve_upstream_auth(
         case Ok(credential):
             auth = credential.auth
             if isinstance(spec.config, AuthorizationCodeConfig) and user_api_key_auth is not None:
-                from litellm.proxy._experimental.mcp_server.db import mark_user_oauth_reconnect
-                from litellm.proxy._experimental.mcp_server.outbound_credentials.httpx_auth import PersonalOAuthAuth
+                from litellm.proxy._experimental.mcp_server.db import (
+                    expire_rejected_user_oauth_token,
+                    mark_user_oauth_reconnect,
+                )
+                from litellm.proxy._experimental.mcp_server.mcp_server_manager import global_mcp_server_manager
+                from litellm.proxy._experimental.mcp_server.outbound_credentials.httpx_auth import (
+                    PersonalOAuthAuth,
+                    StaticHeaderAuth,
+                )
                 from litellm.proxy.proxy_server import prisma_client
+
+                config = spec.config
+                prefix = f"{config.value_prefix} " if config.value_prefix else ""
 
                 async def rejected(header: str) -> None:
                     if prisma_client is not None and user_api_key_auth.user_id:
                         await mark_user_oauth_reconnect(
                             prisma_client, user_api_key_auth.user_id, server.server_id,
-                            access_token=header.removeprefix("Bearer "),
+                            access_token=header.removeprefix(prefix),
                         )
 
-                auth = PersonalOAuthAuth(auth, rejected)
+                async def recover(header: str) -> StaticHeaderAuth | None:
+                    if prisma_client is None or not user_api_key_auth.user_id:
+                        return None
+                    await expire_rejected_user_oauth_token(
+                        prisma_client, user_api_key_auth.user_id, server.server_id,
+                        header.removeprefix(prefix),
+                    )
+                    await global_mcp_server_manager.invalidate_user_oauth_token_cache(
+                        user_api_key_auth.user_id, server.server_id
+                    )
+                    match await provider.resolve_credentials(to_subject(user_api_key_auth, subject_token), spec):
+                        case Ok(renewed) if isinstance(renewed, StaticHeaderAuth):
+                            return renewed
+                        case _:
+                            return None
+
+                auth = PersonalOAuthAuth(auth, recover, rejected)
             # NoOpAuth has no header_name and so never conflicts.
             header_name: Final[str | None] = getattr(auth, "header_name", None)
             if header_name is None or not extra_headers:
