@@ -1,4 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
+// Automatic failure snapshots can include password-input values. Capture only explicit masked screenshots.
+process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
 const baseURL = process.env.UI_PROXY_URL;
 if (!baseURL)
   throw new Error(
@@ -13,6 +15,7 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL,
+    actionTimeout: 15000,
     channel: process.env.UI_BROWSER_CHANNEL ?? "chromium",
     launchOptions: {
       args: [

@@ -18,10 +18,19 @@ test("saved settings fit a phone and keep credentials write-only", async ({
       (element) => element.scrollWidth <= element.clientWidth + 1,
     ),
   ).toBeTruthy();
-  await page.screenshot({
-    path: testInfo.outputPath("oidc-settings-phone.png"),
-    fullPage: true,
-  });
+  for (const [section, name] of [
+    ["OpenID Connect", "top"],
+    ["Roles after sign-in", "roles"],
+    ["Application and API access", "api"],
+  ]) {
+    await page
+      .getByRole("heading", { name: section, exact: true })
+      .scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: testInfo.outputPath(`oidc-settings-phone-${name}.png`),
+      mask: [page.locator('input[type="password"]')],
+    });
+  }
   const storage = await page.evaluate(() =>
     JSON.stringify({
       local: { ...localStorage },
