@@ -69,7 +69,8 @@ class ChatGPTResponsesAPIConfig(OpenAIResponsesAPIConfig):
 
         session_id: Final = ensure_chatgpt_session_id(litellm_params)
         default_headers: Final = get_chatgpt_default_headers(access_token, account_id, session_id)
-        return {**default_headers, **headers}
+        from litellm.llms.chatgpt.common_utils import merge_subscription_headers
+        return merge_subscription_headers(default_headers, headers)
 
     def transform_responses_api_request(
         self,

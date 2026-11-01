@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 
 app = FastAPI()
-state = {"identity": "seat-a", "catalog_error": False, "status": 200, "seen": [], "statuses": [], "stream_error": False, "delay": 0, "status_by_identity": {}, "retry_after_by_identity": {}, "requests": []}
+state = {"identity": "seat-a", "catalog_error": False, "status": 200, "seen": [], "statuses": [], "stream_error": False, "stream_error_at": 3, "delay": 0, "status_by_identity": {}, "retry_after_by_identity": {}, "requests": []}
 codes = {}
 fixtures = json.loads((Path(__file__).parents[2] / "deployment_patches/fixtures/chatgpt_sse.json").read_text())
 
@@ -23,7 +23,7 @@ def jwt(identity):
 @app.post('/control')
 async def control(request: Request):
     changes = await request.json()
-    for key in ('identity', 'catalog_error', 'status', 'statuses', 'stream_error', 'delay', 'status_by_identity', 'retry_after_by_identity'):
+    for key in ('identity', 'catalog_error', 'status', 'statuses', 'stream_error', 'stream_error_at', 'delay', 'status_by_identity', 'retry_after_by_identity'):
         if key in changes:
             state[key] = changes[key]
     if changes.get('clear'):
@@ -78,18 +78,28 @@ async def responses(request: Request):
     elif account_status is not None:
         status = account_status
     response_id = 'resp_' + uuid.uuid4().hex
-    state['requests'].append({'identity': identity, 'status': status, 'response_id': response_id})
+    try:
+        bearer = request.headers.get('authorization', '').removeprefix('Bearer ')
+        payload = bearer.split('.')[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
+        credential_matches = claims['https://api.openai.com/auth']['chatgpt_account_id'] == identity
+    except (ValueError, KeyError, IndexError):
+        credential_matches = False
+    state['requests'].append({'identity': identity, 'status': status, 'response_id': response_id,
+                              'credential_matches': credential_matches,
+                              'forwarded_probe': request.headers.get('x-subscription-probe') == 'forwarded-synthetic'})
     if status != 200:
         retry_after = state['retry_after_by_identity'].get(identity)
         headers = {'retry-after': str(retry_after)} if retry_after is not None else {}
         return JSONResponse({"error": {"type": "server_error", "message": "Synthetic upstream failure"}}, status_code=status, headers=headers)
     events = json.loads(json.dumps(fixtures['text']).replace('resp_synthetic', response_id))
     stream_error, delay = state['stream_error'], state['delay']
+    error_at = state['stream_error_at']
     async def stream():
         for i, event in enumerate(events):
             if delay:
                 await asyncio.sleep(delay)
-            if stream_error and i == 3:
+            if stream_error and i == error_at:
                 yield 'event: error\ndata: {"type":"error","code":"server_error","message":"Synthetic interrupted stream"}\n\n'
                 return
             yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
