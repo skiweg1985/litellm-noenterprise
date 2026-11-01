@@ -47,3 +47,9 @@ jobs:
           python3 scripts/audit_image.py "$IMAGE"
       - name: Exercise the proxy and existing MCP entry points
         run: python3 scripts/smoke_image.py "$IMAGE"
+      - name: Exercise browser identity and provider-token API journeys
+        run: |
+          python3 scripts/test_identity.py "$IMAGE"
+          python3 scripts/test_identity.py "$IMAGE" --reject-missing-master
+          python3 scripts/test_identity.py "$IMAGE" --test-pattern test_scope_profile.py --api-scope-name https://api.example.test/invoke --api-token-scope invoke --api-audience litellm-test --api-token-type at+jwt --master-key fixture.master.with-dots-and-sufficient-length
+          python3 scripts/test_identity.py "$IMAGE" --api-audience litellm-test --reject-invalid-api

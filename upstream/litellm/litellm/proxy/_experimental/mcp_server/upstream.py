@@ -109,6 +109,10 @@ async def resolve_upstream_auth(
     (authorization_code's browser-OAuth 401, token_exchange's RFC 9728 challenge) or maps any
     other ``CredError`` onto its public HTTP status; it never returns an error as a value.
     """
+    if isinstance(spec.config, AuthorizationCodeConfig):
+        from litellm.proxy.auth.oidc_api import require_personal_mcp_subject
+
+        require_personal_mcp_subject(user_api_key_auth)
     match await resolve_credentials_with_source(provider, to_subject(user_api_key_auth, subject_token), spec):
         case Ok(credential):
             auth: Final = credential.auth

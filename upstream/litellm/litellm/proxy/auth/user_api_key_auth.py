@@ -1620,6 +1620,13 @@ async def user_api_key_auth_builder(
         if browser_auth is not None:
             return browser_auth
 
+        from litellm.proxy.auth.oidc_api import authenticate_provider, require_personal_identity
+
+        provider_auth = await authenticate_provider(request, api_key)
+        if provider_auth is not None:
+            return provider_auth
+        require_personal_identity(request)
+
         ### USER-DEFINED AUTH FUNCTION ###
         if enterprise_custom_auth is not None:
             with tracer.trace("litellm.proxy.auth.enterprise_custom_auth"):
@@ -3071,6 +3078,9 @@ async def run_centralized_common_checks(
         )
 
     user_object: LiteLLM_UserTable | None = None if isinstance(user_result, BaseException) else user_result
+    if user_api_key_auth_obj.oidc_identity_source == "provider" and user_object is not None:
+        # Request privileges come from this access token, never a broader browser role.
+        user_object = user_object.model_copy(update={"user_role": user_api_key_auth_obj.user_role})
     project_object: Final[LiteLLM_ProjectTableCachedObj | None] = (
         None if isinstance(project_result, BaseException) else project_result
     )

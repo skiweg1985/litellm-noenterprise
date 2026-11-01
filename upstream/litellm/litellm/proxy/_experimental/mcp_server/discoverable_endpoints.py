@@ -2872,7 +2872,11 @@ def _jwt_auth_issuers() -> list:
 
 
 @router.get("/.well-known/oauth-protected-resource")
-def oauth_protected_resource_root(request: Request) -> dict[str, str | tuple[str, ...]]:
+def oauth_protected_resource_root(request: Request) -> dict:
+    from litellm.proxy.auth.oidc_api import protected_resource_metadata
+
+    if (metadata := protected_resource_metadata()) is not None:
+        return metadata
     request_base_url: Final = get_request_base_url(request)
     parsed: Final = urlparse(request_base_url)
     return {
@@ -2894,6 +2898,10 @@ def _build_aggregate_protected_resource_response(request: Request) -> dict:
     feature and describes the BYOK flow, so it must not be the aggregate
     discovery entry point (same pattern as the per-server documents, which
     advertise ``{base}/{server_name}``)."""
+    from litellm.proxy.auth.oidc_api import protected_resource_metadata
+
+    if (metadata := protected_resource_metadata(mcp=True)) is not None:
+        return metadata
     request_base_url: Final = get_request_base_url(request)
     return {
         "authorization_servers": [f"{request_base_url}/mcp"],

@@ -834,6 +834,9 @@ async def _get_user_oauth_extra_headers_from_db(
         resolve_user_oauth_access_token,
     )
 
+    from litellm.proxy.auth.oidc_api import require_personal_mcp_subject
+
+    require_personal_mcp_subject(user_api_key_auth)
     token: Final = await resolve_user_oauth_access_token(
         getattr(user_api_key_auth, "user_id", None), server, prefetched_creds
     )
@@ -1685,6 +1688,9 @@ async def _get_byok_credential(
     """Retrieve the stored BYOK credential for a user+server pair, served from the worker cache within its TTL."""
     if not mcp_server.is_byok:
         return None
+    from litellm.proxy.auth.oidc_api import require_personal_mcp_subject
+
+    require_personal_mcp_subject(user_api_key_auth)
     user_id: Final = (user_api_key_auth.user_id if user_api_key_auth else None) or ""
     if not user_id:
         return None
@@ -1720,6 +1726,9 @@ async def _check_byok_credential(
     if not mcp_server.is_byok:
         return
 
+    from litellm.proxy.auth.oidc_api import require_personal_mcp_subject
+
+    require_personal_mcp_subject(user_api_key_auth)
     user_id: Final = (user_api_key_auth.user_id if user_api_key_auth else None) or ""
     if not user_id:
         raise HTTPException(

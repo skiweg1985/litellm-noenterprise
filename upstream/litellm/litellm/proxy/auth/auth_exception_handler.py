@@ -68,6 +68,7 @@ def _as_proxy_exception(e: Exception) -> ProxyException:
             type=ProxyErrorTypes.auth_error,
             param=getattr(e, "param", "None"),
             code=getattr(e, "status_code", status.HTTP_401_UNAUTHORIZED),
+            headers=e.headers,
         )
     if isinstance(e, ProxyException):
         return e
