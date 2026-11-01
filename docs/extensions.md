@@ -114,6 +114,20 @@ Missing or unknown selectors fail instead of falling back to another account.
 Request logs record the subscription actually used at each provider attempt. Catalog visibility does not
 automatically create a model deployment.
 
+## Distribute model requests
+
+Choose **Distribute requests** in a model's subscription routing settings and add
+its compatible subscriptions. Each new request gives every available selected
+subscription equal preference through LiteLLM's native random selection. Counts
+can differ; this policy does not measure remaining quota or promise equal totals.
+The choice applies to this model and leaves global routing unchanged.
+
+The availability, cooldown and stream rules above apply to distribution too.
+Recovered members can rejoin. Editing membership changes which accounts new
+requests may use. The same editor also offers a fixed account or an ordered
+preferred account with reserves; distribution ignores list order. Cross-member
+attempts in distribution are recorded as retries rather than reserve switches.
+
 ## Find subscription requests
 
 In **Logs**, the Subscription column shows the name recorded when each request

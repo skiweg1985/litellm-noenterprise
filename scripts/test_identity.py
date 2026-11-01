@@ -161,6 +161,8 @@ general_settings:
         value += "\nlitellm_settings:\n  cache: true\n  cache_params:\n    type: local\n"
     if args.test_pattern == "test_subscription_headers.py":
         value = value.replace("general_settings:\n", "general_settings:\n  forward_client_headers_to_llm_api: true\n", 1)
+    if args.test_pattern == "test_subscription_capacity.py":
+        value += "\nrouter_settings:\n  enable_pre_call_checks: true\n  optional_pre_call_checks: [enforce_model_rate_limits]\n"
     config.write_text(value)
     if args.reject_missing_master:
         config.write_text(
@@ -319,6 +321,8 @@ general_settings:
             *mount,
             "-e",
             "EXPECTED_API_SCOPE=" + args.api_scope_name,
+            "-e",
+            "SUBSCRIPTION_CAPACITY_CHECKS=" + str(args.test_pattern == "test_subscription_capacity.py").lower(),
             "-e",
             "EXPECTED_TOKEN_SCOPE=" + args.api_token_scope,
             "-e",

@@ -1,5 +1,5 @@
-import type { SubscriptionSelection } from "./subscriptions/SubscriptionAssignmentEditor";
 "use client";
+import type { SubscriptionSelection } from "./subscriptions/SubscriptionAssignmentEditor";
 
 import { SubscriptionEditField } from "./subscriptions/SubscriptionEditField";
 import { isChatGPTModel } from "./subscriptions/modelAssignment";
