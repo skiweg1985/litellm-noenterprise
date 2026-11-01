@@ -237,7 +237,9 @@ that precedence order. Pin `server_id` for stable configuration across updates.
 A matching rule grants personal availability without requiring a native API key.
 A nonmatching rule denies visibility, connection and tool access, including for
 an administrator using their own connection. Existing explicit user, team,
-organization, tool and network restrictions still apply. Servers without a rule
+organization, tool and network restrictions still apply. Native user server
+entitlements combine direct server grants, tool permissions, toolsets and access
+groups; tool restrictions and explicit MCP opt-out remain binding. Servers without a rule
 retain their existing LiteLLM permissions. Rule claims are retained automatically;
 API requests use their current verified token claims, never the browser's saved
 role. Configuration changes require restarting the proxy.

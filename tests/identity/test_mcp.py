@@ -443,6 +443,96 @@ class PersonalMCPTests(unittest.TestCase):
             denied.status_code != 200 or denied.json().get("isError"), denied.text
         )
 
+    def test_mixed_native_server_and_tool_grants_preserve_tool_narrowing(self):
+        from test_api import ProviderAPITests, MASTER
+
+        toolset = self.client.post(
+            "/v1/mcp/toolset",
+            headers=MASTER,
+            json={
+                "toolset_name": "mixed-native-whoami",
+                "tools": [{"server_id": "managed_b", "tool_name": "whoami"}],
+            },
+        )
+        self.assertEqual(toolset.status_code, 201, toolset.text)
+        for kind, grant in (
+            ("tools", {"mcp_tool_permissions": {"managed_b": ["whoami"]}}),
+            ("toolset", {"mcp_toolsets": [toolset.json()["toolset_id"]]}),
+        ):
+            with self.subTest(grant=kind):
+                user = "mixed-native-" + kind
+                browser = ProviderAPITests.browser_login(
+                    self, user, ["access", "mcp-a", "mcp-b", "mcp-setup"]
+                )
+                user_id = browser.get("/oidc/session").json()["user_id"]
+                update = self.client.post(
+                    "/user/update",
+                    headers=MASTER,
+                    json={
+                        "user_id": user_id,
+                        "object_permission": {
+                            "mcp_servers": ["managed_a"],
+                            "mcp_tool_search_enabled": True,
+                            **grant,
+                        },
+                    },
+                )
+                self.assertEqual(update.status_code, 200, update.text)
+                headers = self.headers(user, ["access", "mcp-a", "mcp-b", "mcp-setup"])
+                visible = self.client.get("/v1/mcp/server", headers=headers)
+                self.assertEqual(visible.status_code, 200, visible.text)
+                self.assertEqual(
+                    {row["server_id"] for row in visible.json()},
+                    {"managed_a", "managed_b"},
+                )
+                code, verifier = self.connect(headers, "managed_b", actor=user)
+                exchanged = self.exchange(headers, code, verifier, "managed_b")
+                self.assertEqual(exchanged.status_code, 200, exchanged.text)
+                allowed = self.client.post(
+                    "/mcp-rest/tools/call",
+                    headers=headers,
+                    json={"server_id": "managed_b", "name": "whoami", "arguments": {}},
+                )
+                self.assertEqual(allowed.status_code, 200, allowed.text)
+                self.assertIn(user, allowed.text)
+                for payload in (
+                    {
+                        "server_id": "managed_b",
+                        "name": "echo",
+                        "arguments": {"value": "forbidden"},
+                    },
+                    {
+                        "name": "mcp_tool_call",
+                        "arguments": {
+                            "tool_name": "managed_b-echo",
+                            "arguments": {"value": "forbidden"},
+                        },
+                    },
+                ):
+                    denied = self.client.post(
+                        "/mcp-rest/tools/call", headers=headers, json=payload
+                    )
+                    self.assertTrue(
+                        denied.status_code != 200 or denied.json().get("isError"),
+                        denied.text,
+                    )
+
+                opt_out = self.client.post(
+                    "/user/update",
+                    headers=MASTER,
+                    json={
+                        "user_id": user_id,
+                        "object_permission": {
+                            "mcp_servers": ["no-mcp-servers"],
+                            **grant,
+                        },
+                    },
+                )
+                self.assertEqual(opt_out.status_code, 200, opt_out.text)
+                visible = self.client.get("/v1/mcp/server", headers=headers)
+                self.assertEqual(visible.status_code, 200, visible.text)
+                self.assertEqual(visible.json(), [])
+
     def test_browser_session_cannot_execute_personal_tools_over_mcp(self):
         from test_api import ProviderAPITests
 

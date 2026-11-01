@@ -3561,8 +3561,8 @@ class MCPServerManager:
             from litellm.proxy._types import LiteLLM_ObjectPermissionTable
 
             original = user_api_key_auth.object_permission
-            if original is not None and original.mcp_servers:
-                result = [sid for sid in result if sid in self.expand_permission_list(original.mcp_servers)]
+            if original is not None and SpecialMCPServerNames.no_mcp_servers.value in (original.mcp_servers or []):
+                return []
             permission = original.model_copy(update={"mcp_servers": result}) if original else LiteLLM_ObjectPermissionTable(
                 object_permission_id="oidc-request-grants", mcp_servers=result
             )
