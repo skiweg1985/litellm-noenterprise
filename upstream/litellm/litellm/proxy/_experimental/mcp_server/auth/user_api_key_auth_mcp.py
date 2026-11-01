@@ -348,6 +348,14 @@ def _admission_failure_fallback(
     code when the caller DID present a bearer (an expired gateway session
     must re-authorize, not retry a dead token). Anything else re-raises the
     original admission error unchanged."""
+    from litellm.proxy.auth.oidc_api import challenge, settings as api_settings
+
+    provider_config = api_settings()
+    if provider_config is not None and request_route.rstrip("/") == "/mcp" and _is_litellm_auth_admission_error(exc):
+        raise HTTPException(
+            401, "A provider access token or supported LiteLLM key is required",
+            headers=challenge(provider_config, mcp=True, error="invalid_token" if bearer_presented else None),
+        ) from exc
     mcp_servers_from_path: Final = _parse_mcp_server_names_from_path(request_route, mcp_servers)
     if (
         mcp_servers_from_path is not None

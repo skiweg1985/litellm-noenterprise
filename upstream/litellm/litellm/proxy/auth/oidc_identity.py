@@ -133,7 +133,10 @@ def validate_configuration() -> None:
     """Fail at startup rather than leaving the native unauthenticated dev fallback active."""
     from litellm.proxy.proxy_server import general_settings, master_key, prisma_client
 
+    from litellm.proxy.auth.oidc_api import settings as api_settings
+
     config = settings()
+    api_settings()
     if config is None:
         return
     if not master_key:
@@ -554,7 +557,9 @@ def is_personal_mcp_route(path: str, method: str) -> bool:
 
 
 def authorize_browser_route(request: Request, role: str) -> None:
-    personal = is_personal_mcp_route(request.url.path, request.method)
+    from litellm.proxy.auth.auth_utils import get_request_route
+
+    personal = is_personal_mcp_route(get_request_route(request), request.method)
     if role not in ("proxy_admin", "proxy_admin_viewer") and not personal:
         raise HTTPException(403, "This session has personal MCP access, not administration access")
     if role == "proxy_admin_viewer" and request.method not in ("GET", "HEAD", "OPTIONS") and not personal:
@@ -571,7 +576,7 @@ async def authenticate_browser(request: Request, api_key: str | None) -> UserAPI
     request.state.oidc_claims = state["claims"]
     request.state.oidc_user_id = user.user_id
     request.state.oidc_browser = True
-    return UserAPIKeyAuth(
+    auth = UserAPIKeyAuth(
         user_id=user.user_id,
         user_role=user.user_role,
         user_email=user.user_email,
@@ -580,3 +585,5 @@ async def authenticate_browser(request: Request, api_key: str | None) -> UserAPI
         models=list(user.models or []),
         metadata={"oidc_browser": True},
     )
+    auth.oidc_identity_source = "browser"
+    return auth

@@ -3504,6 +3504,7 @@ class UserAPIKeyAuth(LiteLLM_VerificationTokenView):  # the expected response ob
     # bearer or bridge envelope. Not a DB column and never populated from caller-controlled key
     # metadata or JWT claims, so it cannot be forged to gain the team-inherited MCP grant union
     # or to escape the caller-Authorization egress scrub. exclude=True keeps it out of serialization.
+    oidc_identity_source: Literal["browser", "provider"] | None = Field(default=None, exclude=True)
     mcp_admitted_user_subject: bool = Field(default=False, exclude=True)
     requires_fresh_policy: bool = Field(default=False, exclude=True)
     mcp_explicit_grants_only: bool = Field(default=False, exclude=True)
@@ -3575,6 +3576,7 @@ class UserAPIKeyAuth(LiteLLM_VerificationTokenView):  # the expected response ob
         # mcp_admitted_user_subject is a server-only marker, set ONLY by the MCP gateway admission
         # path via post-construction assignment. Strip it from any validated input (constructor
         # kwargs, model_validate, a JWT/key claim splat) so it can never be forged from caller data.
+        values.pop("oidc_identity_source", None)
         values.pop("mcp_admitted_user_subject", None)
         values.pop("requires_fresh_policy", None)
         values.pop("mcp_explicit_grants_only", None)

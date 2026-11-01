@@ -7,10 +7,10 @@ is **LiteLLM 1.106.6**.
 ## Status
 
 The reviewed upstream snapshot and independent build tooling are implemented.
-The dashboard is rebuilt from source. [Generic OIDC browser login](docs/identity.md)
-now supports claim-based admission, stable accounts, ordered role mapping, and
-revocable personal sessions. Provider-token API access and personal MCP
-integration are tracked in
+The dashboard is rebuilt from source. [Generic OIDC identity](docs/identity.md)
+now supports browser sessions and provider-token API access with claim-based
+admission, stable accounts, and ordered role mapping. Discovery metadata and
+API-token scopes share one configuration. Personal MCP integration is tracked in
 [the implementation spec](https://github.com/skiweg1985/litellm-noenterprise/issues/2).
 Existing eligible upstream functions should be reused before adding new ones.
 
@@ -22,6 +22,7 @@ python3 -m unittest discover -s tests/baseline -v
 python3 scripts/audit_source.py
 python3 scripts/audit_image.py litellm-noenterprise:1.106.6
 python3 scripts/smoke_image.py litellm-noenterprise:1.106.6
+python3 scripts/test_identity.py litellm-noenterprise:1.106.6
 ```
 
 The smoke check starts isolated local containers, sends a proxy request to a
@@ -37,5 +38,4 @@ Track work in [GitHub Issues](https://github.com/skiweg1985/litellm-noenterprise
 Changes reach protected `main` through pull requests; branch conventions are in
 [AGENTS.md](AGENTS.md#git-workflow). Preserve vendor ancestry with merge commits.
 
-Next: integrate provider-token API access, then extend the
-existing personal MCP workflow to the agreed permission and connection models.
+Next: extend the existing personal MCP workflow to the agreed permission and connection models.

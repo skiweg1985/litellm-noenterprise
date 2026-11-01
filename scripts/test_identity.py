@@ -2,6 +2,7 @@
 """Run public OIDC acceptance tests using isolated Docker fixtures."""
 
 import argparse
+import json
 import subprocess
 import tempfile
 import time
@@ -11,8 +12,17 @@ from pathlib import Path
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("image", default="litellm-noenterprise:baseline", nargs="?")
 parser.add_argument("--reject-missing-master", action="store_true")
+parser.add_argument("--reject-invalid-api", action="store_true")
+parser.add_argument("--test-pattern", default="test*.py")
+parser.add_argument("--api-scope-name", default="api://litellm-api/access")
+parser.add_argument("--api-token-scope", default="access")
+parser.add_argument("--api-audience", default="litellm-api")
+parser.add_argument("--master-key", default="sk-identity-test-only")
+parser.add_argument("--api-token-type", choices=["JWT", "at+jwt"], default="JWT")
 parser.add_argument(
-    "--source-overlay", action="store_true", help="Development only: run mounted source instead of installed image code"
+    "--source-overlay",
+    action="store_true",
+    help="Development only: run mounted source instead of installed image code",
 )
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
@@ -32,12 +42,39 @@ def run(name, *parts):
 
 with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
     config = Path(tmp) / "config.yaml"
-    config.write_text("""mcp_servers:
+    config.write_text("""model_list:
+  - model_name: fixture-model
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: fixture-unused
+      mock_response: fixture completion
+mcp_servers:
   fixture:
     url: http://mcp-upstream:8090/mcp
     transport: http
+  delegate:
+    url: http://mcp-upstream:8090/mcp
+    transport: http
+    auth_type: oauth_delegate
+  personal:
+    url: http://mcp-upstream:8090/mcp
+    transport: http
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    authorization_url: http://issuer:8080/authorize
+    token_url: http://issuer:8080/token
+    client_id: litellm-test
 general_settings:
   master_key: sk-identity-test-only
+  oidc_api:
+    resource: http://proxy:4000
+    audience: litellm-api
+    scope_claim: scp
+    token_types: [JWT]
+    required_claims:
+      - {claim: identity_kind, any_of: [user]}
+    scopes:
+      - {name: 'api://litellm-api/access', token_value: access}
   oidc_identity:
     issuer: http://issuer:8080
     client_id: litellm-test
@@ -55,6 +92,15 @@ general_settings:
         role: internal_user
     default_role: internal_user_viewer
 """)
+    value = config.read_text().replace("api://litellm-api/access", args.api_scope_name)
+    value = value.replace("token_value: access", "token_value: " + json.dumps(args.api_token_scope))
+    value = value.replace("audience: litellm-api", "audience: " + json.dumps(args.api_audience))
+    value = value.replace("token_types: [JWT]", "token_types: " + json.dumps([args.api_token_type]))
+    if not args.reject_missing_master:
+        value = value.replace(
+            "master_key: sk-identity-test-only", "master_key: " + json.dumps(args.master_key)
+        )
+    config.write_text(value)
     if args.reject_missing_master:
         config.write_text(config.read_text().replace("  master_key: sk-identity-test-only\n", ""))
     database = "postgresql://fixture:fixture-only@db:5432/litellm"
@@ -92,7 +138,14 @@ general_settings:
             "--skip-generate",
         )
         mount = ["--mount", f"type=bind,src={root},dst=/work,readonly"]
-        run("mcp-upstream", *mount, "--entrypoint", "python", args.image, "/work/tests/identity/fixtures/mcp_server.py")
+        run(
+            "mcp-upstream",
+            *mount,
+            "--entrypoint",
+            "python",
+            args.image,
+            "/work/tests/identity/fixtures/mcp_server.py",
+        )
         run("issuer", *mount, "--entrypoint", "python", args.image, "/work/tests/identity/fixtures/issuer.py")
         source_env = ["-e", "PYTHONPATH=/work/upstream/litellm"] if args.source_overlay else []
         run(
@@ -128,18 +181,27 @@ general_settings:
                 check=False,
             )
             if result.returncode == 0:
-                if args.reject_missing_master:
-                    raise AssertionError("OIDC configured without a master key still started")
+                if args.reject_missing_master or args.reject_invalid_api:
+                    raise AssertionError("Invalid OIDC configuration still started")
                 break
-            if (
-                args.reject_missing_master
-                and docker("inspect", prefix + "-proxy", "--format", "{{.State.Status}}").stdout.strip() == "exited"
-            ):
+            if (args.reject_missing_master or args.reject_invalid_api) and docker(
+                "inspect", prefix + "-proxy", "--format", "{{.State.Status}}"
+            ).stdout.strip() == "exited":
                 logs = docker("logs", prefix + "-proxy", check=False)
-                if "OIDC requires a master key" not in logs.stdout + logs.stderr:
+                expected = (
+                    "OIDC requires a master key"
+                    if args.reject_missing_master
+                    else "OIDC API configuration is invalid"
+                )
+                if expected not in logs.stdout + logs.stderr:
                     raise AssertionError("Unexpected startup failure")
-                print("PASS: OIDC without a master key is rejected at startup")
+                print("PASS: " + expected + " (startup rejected)")
                 raise SystemExit(0)
+            if (
+                docker("inspect", prefix + "-proxy", "--format", "{{.State.Status}}").stdout.strip()
+                == "exited"
+            ):
+                raise RuntimeError("proxy exited during startup")
             time.sleep(1)
         else:
             raise RuntimeError("proxy did not become ready")
@@ -149,6 +211,16 @@ general_settings:
             "--network",
             prefix,
             *mount,
+            "-e",
+            "EXPECTED_API_SCOPE=" + args.api_scope_name,
+            "-e",
+            "EXPECTED_TOKEN_SCOPE=" + args.api_token_scope,
+            "-e",
+            "EXPECTED_API_AUDIENCE=" + args.api_audience,
+            "-e",
+            "EXPECTED_TOKEN_TYPE=" + args.api_token_type,
+            "-e",
+            "EXPECTED_MASTER_KEY=" + args.master_key,
             "--entrypoint",
             "python",
             args.image,
@@ -158,6 +230,8 @@ general_settings:
             "-s",
             "/work/tests/identity",
             "-v",
+            "-p",
+            args.test_pattern,
             check=False,
         )
         print(result.stdout)

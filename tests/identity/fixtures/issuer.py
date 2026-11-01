@@ -71,6 +71,25 @@ class Handler(BaseHTTPRequestHandler):
             ACTOR.clear()
             ACTOR.update(json.loads(body))
             return self.reply({"ok": True})
+        if self.path == "/control/access-token":
+            overrides = json.loads(body)
+            claims = {
+                "iss": ISSUER,
+                "aud": "litellm-api",
+                "iat": int(time.time()),
+                "exp": int(time.time()) + 300,
+                "sub": "api-alice",
+                "oid": "stable-api-alice",
+                "roles": ["access"],
+                "identity_kind": "user",
+                "scp": "access",
+                **overrides,
+            }
+            headers = {"kid": "test-key", "typ": claims.pop("_typ", "JWT")}
+            key = WRONG_KEY if claims.pop("_wrong_key", False) else KEY
+            for name in claims.pop("_omit", []):
+                claims.pop(name, None)
+            return self.reply({"access_token": jwt.encode(claims, key, algorithm="RS256", headers=headers)})
         if self.path == "/control/metadata":
             AUTH_METHOD.update(json.loads(body))
             return self.reply({"ok": True})
