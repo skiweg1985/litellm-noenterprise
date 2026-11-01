@@ -159,6 +159,8 @@ general_settings:
         )
     if args.response_cache:
         value += "\nlitellm_settings:\n  cache: true\n  cache_params:\n    type: local\n"
+    if args.test_pattern == "test_subscription_headers.py":
+        value = value.replace("general_settings:\n", "general_settings:\n  forward_client_headers_to_llm_api: true\n", 1)
     config.write_text(value)
     if args.reject_missing_master:
         config.write_text(
