@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1.7
 ARG PYTHON_IMAGE=python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
-ARG NODE_IMAGE=node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
+ARG NODE_IMAGE=node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.7@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a
 FROM ${UV_IMAGE} AS uv
 FROM ${NODE_IMAGE} AS ui
 WORKDIR /ui
 ENV NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=6144
-COPY upstream/litellm/ui/litellm-dashboard/package*.json ./
+COPY upstream/litellm/ui/litellm-dashboard/package*.json upstream/litellm/ui/litellm-dashboard/.npmrc ./
 RUN npm ci --no-audit --no-fund
 COPY upstream/litellm/ui/litellm-dashboard/ ./
 RUN npm run build
