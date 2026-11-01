@@ -9,7 +9,7 @@ def fixed_subscription_group(router, model):
         model = model.get('model')
     deployments = [item for item in router.model_list
                    if item.get('model_name') == model or (item.get('model_info') or {}).get('id') == model]
-    fixed = any(((item.get('model_info') or {}).get(ASSIGNMENT) or {}).get('mode') == 'fixed' for item in deployments)
+    fixed = any(((item.get('model_info') or {}).get(ASSIGNMENT) or {}).get('mode') in ('fixed', 'priority', 'distribution') for item in deployments)
     if fixed and len(deployments) != 1:
         import litellm
         raise litellm.ServiceUnavailableError(
@@ -26,6 +26,8 @@ def pin_subscription_credentials(deployment, kwargs):
     from litellm.litellm_core_utils.litellm_logging import Logging
     if isinstance(logging_obj, Logging):
         logging_obj._chatgpt_subscription_deployment_id = (deployment.get('model_info') or {}).get('id')
+        from .expansion import record_selection
+        record_selection(deployment, logging_obj)
     assignment = (deployment.get('model_info') or {}).get(ASSIGNMENT)
     if not assignment:
         return

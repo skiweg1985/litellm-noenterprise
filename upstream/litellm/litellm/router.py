@@ -13501,6 +13501,9 @@ class Router:
             request_kwargs=request_kwargs,
         )
 
+        from litellm.proxy.extensions.chatgpt_subscriptions.expansion import expand_candidates
+        healthy_deployments = await expand_candidates(self, healthy_deployments, request_kwargs)
+
         # IF TEAM ID SPECIFIED ON MODEL, AND REQUEST CONTAINS USER_API_KEY_TEAM_ID, FILTER OUT MODELS THAT ARE NOT IN THE TEAM
         ## THIS PREVENTS WRITING FILES OF OTHER TEAMS TO MODELS THAT ARE TEAM-ONLY MODELS
         healthy_deployments = filter_team_based_models(
@@ -13866,6 +13869,11 @@ class Router:
                 )
                 phase_event(_DEPLOYMENT_SELECTED_EVENT, pick_attributes)
                 return healthy_deployments[0]
+
+            from litellm.proxy.extensions.chatgpt_subscriptions.expansion import choose_managed
+            managed_selection = choose_managed(healthy_deployments, model)
+            if managed_selection is not None:
+                return managed_selection
 
             start_time: Final = time.time()
             if strategy == "simple-shuffle":

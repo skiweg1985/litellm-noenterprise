@@ -6672,7 +6672,7 @@ def get_standard_logging_object_payload(
 
         id = response_obj.get("id", kwargs.get("litellm_call_id"))
 
-        _model_id: Final = metadata.get("model_info", {}).get("id", "")
+        _model_id: Final = getattr(logging_obj, "_subscription_parent_model_id", None) or metadata.get("model_info", {}).get("id", "")
         _model_group: Final = metadata.get("model_group", "")
 
         request_tags: Final = StandardLoggingPayloadSetup.get_request_tags(

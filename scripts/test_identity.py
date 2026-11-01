@@ -17,6 +17,7 @@ parser.add_argument("--browser-admin-disabled", action="store_true")
 parser.add_argument("--reject-missing-master", action="store_true")
 parser.add_argument("--reject-invalid-api", action="store_true")
 parser.add_argument("--test-pattern", default="test*.py")
+parser.add_argument("--proxy-workers", type=int, choices=range(1, 9), default=1, help="Run independent proxy workers against the same synthetic database and registry")
 parser.add_argument("--response-cache", action="store_true", help="Enable local response caching for cache attribution checks")
 parser.add_argument("--api-scope-name", default="api://litellm-api/access")
 parser.add_argument("--api-token-scope", default="access")
@@ -260,6 +261,8 @@ general_settings:
             "--port",
             "4000",
             "--use_prisma_db_push",
+            "--num_workers",
+            str(args.proxy_workers),
         )
         for _ in range(120):
             result = docker(

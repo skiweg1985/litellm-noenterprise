@@ -95,6 +95,7 @@ def begin(logging_obj, credential, model):
         "connection_revision": credential.connection_revision,
         "model": model,
         "model_id": model_id,
+        "parent_model_id": getattr(logging_obj, "_subscription_parent_model_id", None),
         "started_at": now(),
         "ended_at": None,
         "outcome": "incomplete",
