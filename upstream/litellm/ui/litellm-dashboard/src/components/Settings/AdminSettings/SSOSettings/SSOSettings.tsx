@@ -1,294 +1,113 @@
 "use client";
 
-import { Copy, Edit, Shield, Trash2 } from "lucide-react";
-import { useState } from "react";
-
-import { useSSOSettings, type SSOSettingsValues } from "@/app/(dashboard)/hooks/sso/useSSOSettings";
-import { Logo } from "@/components/molecules/logo/Logo";
-import { Badge } from "@/components/ui/badge";
+import { useEffect, useState } from "react";
+import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
+import { isProxyAdminRole } from "@/utils/roles";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { copyToClipboard } from "@/utils/dataUtils";
+import { getOIDCSettings, type SettingsResponse, type SaveSettingsResponse } from "@/lib/http/oidcSettings";
+import LegacySSOSettings from "./LegacySSOSettings";
+import { OIDCSettingsForm } from "./oidc/OIDCSettingsForm";
 
-import AddSSOSettingsModal from "./Modals/AddSSOSettingsModal";
-import DeleteSSOSettingsModal from "./Modals/DeleteSSOSettingsModal";
-import EditSSOSettingsModal from "./Modals/EditSSOSettingsModal";
-import RedactableField from "./RedactableField";
-import RoleMappings from "./RoleMappings";
-import SSOSettingsEmptyPlaceholder from "./SSOSettingsEmptyPlaceholder";
-import SSOSettingsLoadingSkeleton from "./SSOSettingsLoadingSkeleton";
-import { ssoProviderDisplayNames, ssoProviderLogoMap } from "./constants";
-import { detectSSOProvider } from "./utils";
-
-function NotConfigured() {
-  return <span className="text-muted-foreground italic">Not configured</span>;
-}
-
-function DetailRow({ children, label }: { children: React.ReactNode; label: string }) {
+function LegacySettings({ active }: { active: boolean }) {
+  const [open, setOpen] = useState(active);
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3">
-      <dt className="bg-muted/50 px-4 py-3 text-sm font-medium text-foreground">{label}</dt>
-      <dd className="min-w-0 px-4 py-3 text-sm text-foreground sm:col-span-2">{children}</dd>
-    </div>
+    <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)} className="rounded-lg border p-4">
+      <summary className="cursor-pointer text-sm font-medium">
+        {active ? "Current legacy SSO settings" : "Preserved legacy SSO settings"}
+      </summary>
+      <p className="my-3 text-sm text-muted-foreground">
+        {active
+          ? "Your existing SSO configuration remains in use until OpenID Connect is enabled."
+          : "These settings are preserved. Independent OpenID Connect takes precedence while enabled."}
+      </p>
+      {open && <LegacySSOSettings />}
+    </details>
   );
 }
 
-function EndpointValue({ value }: { value?: string | null }) {
-  if (!value) return <span className="font-mono text-muted-foreground">-</span>;
-
+function Settings({ accessToken, isOidcSession }: { accessToken: string; isOidcSession: boolean }) {
+  const [settings, setSettings] = useState<SettingsResponse | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [editIndependent, setEditIndependent] = useState(false);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
+  function saved(result: SaveSettingsResponse) {
+    setSettings(result);
+    if (isOidcSession && result.sessions_invalidated) setNeedsSignIn(true);
+  }
+  useEffect(() => {
+    const controller = new AbortController();
+    getOIDCSettings(accessToken, controller.signal)
+      .then(setSettings)
+      .catch(() => {
+        if (!controller.signal.aborted) setFailed(true);
+      });
+    return () => controller.abort();
+  }, [accessToken, reload]);
+  if (failed)
+    return (
+      <div className="space-y-3" role="alert">
+        <p>Sign-in settings could not be loaded. Your configuration has not changed.</p>
+        <Button
+          onClick={() => {
+            setFailed(false);
+            setReload((value) => value + 1);
+          }}
+        >
+          Try again
+        </Button>
+      </div>
+    );
+  if (needsSignIn)
+    return (
+      <div role="alert" className="space-y-3">
+        <p>Your settings were saved. Your current sign-in has ended.</p>
+        <a className="underline" href="/oidc/login">
+          Sign in again
+        </a>
+        <p>
+          <a className="underline" href="/fallback/login">
+            Native administrator recovery login
+          </a>
+        </p>
+      </div>
+    );
+  if (!settings) return <p role="status">Loading sign-in settings…</p>;
+  const legacyActive = settings.legacy_sso_configured && !settings.enabled;
+  const showForm = !legacyActive || editIndependent || settings.source === "file";
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <span className="truncate font-mono text-sm text-muted-foreground">{value}</span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Copy value"
-        onClick={() => void copyToClipboard(value, "Copied to clipboard")}
-      >
-        <Copy className="size-3.5" />
-      </Button>
+    <div className="space-y-6">
+      {legacyActive && <LegacySettings active />}
+      {showForm ? (
+        <OIDCSettingsForm
+          key={settings.revision}
+          settings={settings}
+          accessToken={accessToken}
+          onSaved={saved}
+          onReload={() => {
+            setSettings(null);
+            setReload((value) => value + 1);
+          }}
+        />
+      ) : (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">OpenID Connect</h2>
+          <p className="text-sm text-muted-foreground">
+            Configure independent OpenID Connect for sign-in, application access and personal MCP permissions. Your
+            existing SSO settings will be retained.
+          </p>
+          <Button onClick={() => setEditIndependent(true)}>Configure OpenID Connect</Button>
+        </div>
+      )}
+      {settings.legacy_sso_configured && !legacyActive && <LegacySettings active={false} />}
     </div>
   );
 }
 
 export default function SSOSettings() {
-  const { data: ssoSettings, refetch, isLoading } = useSSOSettings();
-  const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
-  const [isAddModalVisible, setIsAddModalVisible] = useState(false);
-  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
-  const isSSOConfigured = [
-    ssoSettings?.values.google_client_id,
-    ssoSettings?.values.microsoft_client_id,
-    ssoSettings?.values.generic_client_id,
-    ssoSettings?.values.saml_idp_metadata_url,
-    ssoSettings?.values.saml_idp_metadata_xml,
-  ].some(Boolean);
-  const selectedProvider = ssoSettings?.values ? detectSSOProvider(ssoSettings.values) : null;
-  const isRoleMappingsEnabled = Boolean(ssoSettings?.values.role_mappings);
-  const isTeamMappingsEnabled = Boolean(ssoSettings?.values.team_mappings);
-
-  const renderSimpleValue = (value?: string | null) => value || <NotConfigured />;
-  const renderTeamMappingsField = (values: SSOSettingsValues) =>
-    values.team_mappings?.team_ids_jwt_field ? (
-      <Badge variant="secondary">{values.team_mappings.team_ids_jwt_field}</Badge>
-    ) : (
-      <NotConfigured />
-    );
-
-  const providerConfigs = {
-    google: {
-      providerText: ssoProviderDisplayNames.google,
-      fields: [
-        {
-          label: "Client ID",
-          render: (values: SSOSettingsValues) => <RedactableField value={values.google_client_id} />,
-        },
-        {
-          label: "Client Secret",
-          render: (values: SSOSettingsValues) => <RedactableField value={values.google_client_secret} />,
-        },
-        { label: "Proxy Base URL", render: (values: SSOSettingsValues) => renderSimpleValue(values.proxy_base_url) },
-      ],
-    },
-    microsoft: {
-      providerText: ssoProviderDisplayNames.microsoft,
-      fields: [
-        {
-          label: "Client ID",
-          render: (values: SSOSettingsValues) => <RedactableField value={values.microsoft_client_id} />,
-        },
-        {
-          label: "Client Secret",
-          render: (values: SSOSettingsValues) => <RedactableField value={values.microsoft_client_secret} />,
-        },
-        { label: "Tenant", render: (values: SSOSettingsValues) => renderSimpleValue(values.microsoft_tenant) },
-        { label: "Proxy Base URL", render: (values: SSOSettingsValues) => renderSimpleValue(values.proxy_base_url) },
-      ],
-    },
-    okta: {
-      providerText: ssoProviderDisplayNames.okta,
-      fields: [
-        {
-          label: "Client ID",
-          render: (values: SSOSettingsValues) => <RedactableField value={values.generic_client_id} />,
-        },
-        {
-          label: "Client Secret",
-          render: (values: SSOSettingsValues) => <RedactableField value={values.generic_client_secret} />,
-        },
-        {
-          label: "Authorization Endpoint",
-          render: (values: SSOSettingsValues) => <EndpointValue value={values.generic_authorization_endpoint} />,
-        },
-        {
-          label: "Token Endpoint",
-          render: (values: SSOSettingsValues) => <EndpointValue value={values.generic_token_endpoint} />,
-        },
-        {
-          label: "User Info Endpoint",
-          render: (values: SSOSettingsValues) => <EndpointValue value={values.generic_userinfo_endpoint} />,
-        },
-        { label: "Scopes", render: (values: SSOSettingsValues) => renderSimpleValue(values.generic_scope) },
-        { label: "Proxy Base URL", render: (values: SSOSettingsValues) => renderSimpleValue(values.proxy_base_url) },
-        isTeamMappingsEnabled
-          ? { label: "Team IDs JWT Field", render: (values: SSOSettingsValues) => renderTeamMappingsField(values) }
-          : null,
-      ],
-    },
-    generic: {
-      providerText: ssoProviderDisplayNames.generic,
-      fields: [
-        {
-          label: "Client ID",
-          render: (values: SSOSettingsValues) => <RedactableField value={values.generic_client_id} />,
-        },
-        {
-          label: "Client Secret",
-          render: (values: SSOSettingsValues) => <RedactableField value={values.generic_client_secret} />,
-        },
-        {
-          label: "Authorization Endpoint",
-          render: (values: SSOSettingsValues) => <EndpointValue value={values.generic_authorization_endpoint} />,
-        },
-        {
-          label: "Token Endpoint",
-          render: (values: SSOSettingsValues) => <EndpointValue value={values.generic_token_endpoint} />,
-        },
-        {
-          label: "User Info Endpoint",
-          render: (values: SSOSettingsValues) => <EndpointValue value={values.generic_userinfo_endpoint} />,
-        },
-        { label: "Scopes", render: (values: SSOSettingsValues) => renderSimpleValue(values.generic_scope) },
-        { label: "Proxy Base URL", render: (values: SSOSettingsValues) => renderSimpleValue(values.proxy_base_url) },
-        isTeamMappingsEnabled
-          ? { label: "Team IDs JWT Field", render: (values: SSOSettingsValues) => renderTeamMappingsField(values) }
-          : null,
-      ],
-    },
-    saml: {
-      providerText: ssoProviderDisplayNames.saml,
-      fields: [
-        {
-          label: "IdP Metadata URL",
-          render: (values: SSOSettingsValues) => <EndpointValue value={values.saml_idp_metadata_url} />,
-        },
-        {
-          label: "IdP Metadata XML",
-          render: (values: SSOSettingsValues) =>
-            values.saml_idp_metadata_xml ? <Badge variant="secondary">Provided</Badge> : <NotConfigured />,
-        },
-        {
-          label: "SP Entity ID",
-          render: (values: SSOSettingsValues) => <EndpointValue value={values.saml_sp_entity_id} />,
-        },
-        {
-          label: "Allow IdP-initiated (unsolicited) responses",
-          render: (values: SSOSettingsValues) => (
-            <Badge variant={values.saml_allow_unsolicited === "true" ? "default" : "secondary"}>
-              {values.saml_allow_unsolicited === "true" ? "Enabled" : "Disabled"}
-            </Badge>
-          ),
-        },
-        { label: "Proxy Base URL", render: (values: SSOSettingsValues) => renderSimpleValue(values.proxy_base_url) },
-      ],
-    },
-  };
-
-  const renderSSOSettings = () => {
-    if (!ssoSettings?.values || !selectedProvider) return null;
-    const config = providerConfigs[selectedProvider as keyof typeof providerConfigs];
-    if (!config) return null;
-
-    return (
-      <dl className="divide-y divide-border overflow-hidden rounded-md border border-border">
-        <DetailRow label="Provider">
-          <div className="flex items-center gap-2">
-            {ssoProviderLogoMap[selectedProvider] && (
-              <Logo
-                src={ssoProviderLogoMap[selectedProvider]}
-                label={ssoProviderDisplayNames[selectedProvider] || selectedProvider}
-                className="size-6 object-contain"
-              />
-            )}
-            <span>{config.providerText}</span>
-          </div>
-        </DetailRow>
-        {config.fields.map(
-          (field) =>
-            field && (
-              <DetailRow key={field.label} label={field.label}>
-                {field.render(ssoSettings.values)}
-              </DetailRow>
-            ),
-        )}
-      </dl>
-    );
-  };
-
-  return (
-    <>
-      {isLoading ? (
-        <SSOSettingsLoadingSkeleton />
-      ) : (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <Shield className="size-6 text-muted-foreground" />
-                <div>
-                  <CardTitle>
-                    <h3>SSO Configuration</h3>
-                  </CardTitle>
-                  <CardDescription>Manage Single Sign-On authentication settings</CardDescription>
-                </div>
-              </div>
-              {isSSOConfigured && (
-                <CardAction className="flex gap-2">
-                  <Button type="button" variant="outline" onClick={() => setIsEditModalVisible(true)}>
-                    <Edit />
-                    Edit SSO Settings
-                  </Button>
-                  <Button type="button" variant="destructive" onClick={() => setIsDeleteModalVisible(true)}>
-                    <Trash2 />
-                    Delete SSO Settings
-                  </Button>
-                </CardAction>
-              )}
-            </CardHeader>
-            <CardContent>
-              {isSSOConfigured ? (
-                renderSSOSettings()
-              ) : (
-                <SSOSettingsEmptyPlaceholder onAdd={() => setIsAddModalVisible(true)} />
-              )}
-            </CardContent>
-          </Card>
-          {isRoleMappingsEnabled && <RoleMappings roleMappings={ssoSettings?.values.role_mappings} />}
-        </div>
-      )}
-
-      <DeleteSSOSettingsModal
-        isVisible={isDeleteModalVisible}
-        onCancel={() => setIsDeleteModalVisible(false)}
-        onSuccess={() => refetch()}
-      />
-      <AddSSOSettingsModal
-        isVisible={isAddModalVisible}
-        onCancel={() => setIsAddModalVisible(false)}
-        onSuccess={() => {
-          setIsAddModalVisible(false);
-          refetch();
-        }}
-      />
-      <EditSSOSettingsModal
-        isVisible={isEditModalVisible}
-        onCancel={() => setIsEditModalVisible(false)}
-        onSuccess={() => {
-          setIsEditModalVisible(false);
-          refetch();
-        }}
-      />
-    </>
-  );
+  const { accessToken, isLoading, isAuthorized, userRole, isOidcSession } = useAuthorized();
+  if (isLoading) return <p role="status">Checking your session…</p>;
+  if (!isAuthorized || !accessToken || !isProxyAdminRole(userRole ?? ""))
+    return <p role="alert">Administrator access is required to manage sign-in settings.</p>;
+  return <Settings accessToken={accessToken} isOidcSession={isOidcSession} />;
 }
