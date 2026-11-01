@@ -115,6 +115,22 @@ class SubscriptionReviewTests(model_tests.SubscriptionModelTests):
         self.assertEqual(self.client.get(path).json()["state"], "paused")
         self.control(status_by_identity={})
 
+    def test_fixed_model_status_includes_native_credential_cooldown(self):
+        account, identity = self.connect("ReviewFixedRejected")
+        name, created = self.create(account)
+        model_id = created.json()["model_id"]
+        self.control(status_by_identity={identity: 401})
+        failed = self.client.post(
+            "/v1/responses", json={"model": name, "input": "Fixed rejection"}
+        )
+        self.assertEqual(failed.status_code, 401, failed.text)
+        status = self.client.get(
+            "/chatgpt/api/models/" + model_id + "/availability"
+        ).json()
+        self.assertEqual(status["state"], "unavailable", status)
+        self.assertEqual(status["members"][0]["state"], "cooldown", status)
+        self.control(status_by_identity={})
+
 
 for _name in tuple(model_tests.SubscriptionModelTests.__dict__):
     if _name.startswith("test_"):

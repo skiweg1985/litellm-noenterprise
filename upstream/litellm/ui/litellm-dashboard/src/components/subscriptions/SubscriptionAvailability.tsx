@@ -49,7 +49,7 @@ export function SubscriptionAvailability({
           <p role="status">{summaries[value.state]}</p>
           <ul className="space-y-1">
             {value.members.map((member) => (
-              <li key={member.subscription_id}>
+              <li key={member.subscription_id} className="break-words">
                 {names[member.subscription_id] || "Assigned subscription"}: {descriptions[member.state]}
                 {member.retry_at != null && <> (retry after {new Date(member.retry_at * 1000).toLocaleTimeString()})</>}
               </li>

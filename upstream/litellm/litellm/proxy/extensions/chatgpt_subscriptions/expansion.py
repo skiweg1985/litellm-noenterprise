@@ -33,14 +33,14 @@ def connection_eligible(status):
     return not status["retired"] and (status["token_valid"] or status["state"] == "token_expired")
 
 
-async def member_cooldowns(router, member_ids):
+async def member_cooldowns(router, member_ids, *, include_credential_rejections=False):
     rows = await router.cooldown_cache.async_get_active_cooldowns(
         model_ids=member_ids, parent_otel_span=None
     )
     # Credential rejection is separately tied to the current token fingerprint;
     # a renewed credential does not inherit the old generation's 401 cooldown.
     return {identifier: detail for identifier, detail in (rows or [])
-            if str(detail.get("status_code")) not in ("401", "403")}
+            if include_credential_rejections or str(detail.get("status_code")) not in ("401", "403")}
 
 
 def unavailable(

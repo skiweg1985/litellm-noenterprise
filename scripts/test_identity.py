@@ -2,6 +2,7 @@
 """Run public OIDC acceptance tests using isolated Docker fixtures."""
 
 import argparse
+import fnmatch
 import json
 import os
 import subprocess
@@ -163,7 +164,7 @@ general_settings:
         )
     if args.response_cache:
         value += "\nlitellm_settings:\n  cache: true\n  cache_params:\n    type: local\n"
-    if args.test_pattern == "test_subscription_headers.py":
+    if fnmatch.fnmatch("test_subscription_headers.py", args.test_pattern):
         value = value.replace("general_settings:\n", "general_settings:\n  forward_client_headers_to_llm_api: true\n", 1)
     if args.test_pattern == "test_subscription_capacity.py":
         value += "\nrouter_settings:\n  enable_pre_call_checks: true\n  optional_pre_call_checks: [enforce_model_rate_limits]\n"

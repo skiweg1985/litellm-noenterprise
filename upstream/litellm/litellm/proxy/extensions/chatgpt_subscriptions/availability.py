@@ -45,7 +45,13 @@ async def model_availability(parent, accounts):
         member_model_id(model_id, identifier, assignment["mode"])
         for identifier in identifiers
     ]
-    cooldowns = await member_cooldowns(llm_router, member_ids)
+    # Fixed models retain native credential-error cooldowns; multi-member
+    # routing instead fences the rejected token generation in Account state.
+    cooldowns = await member_cooldowns(
+        llm_router,
+        member_ids,
+        include_credential_rejections=assignment["mode"] == "fixed",
+    )
     by_id = {
         account.status()["subscription_id"]: account.status() for account in accounts
     }

@@ -165,6 +165,11 @@ async def chatgpt_deployments():
     return resolve_deployments(models, _credential_values, set(by_id.values()), by_id)
 
 
+async def deployment_snapshot(deployments):
+    result = deployments()
+    return await result if inspect.isawaitable(result) else result
+
+
 def problems(deployments):
     """Broken ChatGPT deployments, without secrets."""
     return [
@@ -245,10 +250,6 @@ def router(accounts, services, dependency=None, deployments=None, requests=None,
             raise HTTPException(404, "Unknown model.")
         return JSONResponse((await model_availability(parent, accounts)).model_dump(), headers=NO_STORE)
 
-    async def deployment_snapshot():
-        result = deployments()
-        return await result if inspect.isawaitable(result) else result
-
     async def describe(account, snapshot=None):
         services.setdefault(account.name, UsageService(account=account.name, path=account.path, transport=account.transport))
         catalogs.setdefault(account.name, ModelsService(account=account.name, path=account.path, transport=account.transport))
@@ -260,7 +261,7 @@ def router(accounts, services, dependency=None, deployments=None, requests=None,
             except MonitoringError as exc:
                 quota_error = str(exc)
         if snapshot is None:
-            snapshot = await deployment_snapshot()
+            snapshot = await deployment_snapshot(deployments)
         own = [d for d in snapshot if d["account"] == account.name]
         available, available_error = None, None
         if status["token_valid"] and account.name in catalogs:
@@ -294,7 +295,7 @@ def router(accounts, services, dependency=None, deployments=None, requests=None,
 
     @api.get(API, response_model=SubscriptionList)
     async def list_accounts():
-        snapshot = await deployment_snapshot()
+        snapshot = await deployment_snapshot(deployments)
         return JSONResponse(
             {
                 "accounts": [await describe(account, snapshot) for account in accounts],

@@ -8,6 +8,12 @@ import test_subscription_models as base
 
 class SubscriptionConversionTests(base.SubscriptionModelTests):
     def test_unmanaged_conversion_is_enforced_on_other_worker(self):
+        self.assert_conversion()
+
+    def test_converted_model_cannot_fall_back_to_unassigned_provider(self):
+        self.assert_conversion(failing=True)
+
+    def assert_conversion(self, failing=False):
         account, identity = self.connect("ReviewConverted")
         name = "conversion-" + uuid.uuid4().hex[:8]
         created = self.client.post(
@@ -53,6 +59,35 @@ class SubscriptionConversionTests(base.SubscriptionModelTests):
             time.sleep(1)
         else:
             self.fail("Could not observe unmanaged model convergence: " + repr(before))
+        outside = None
+        if failing:
+            outside = "outside-" + uuid.uuid4().hex[:8]
+            response = self.client.post(
+                "/model/new",
+                json={
+                    "model_name": outside,
+                    "litellm_params": {
+                        "model": "openai/gpt-4o-mini",
+                        "api_key": "synthetic",
+                        "api_base": "http://chatgpt:8091",
+                    },
+                },
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.models.append(response.json()["model_id"])
+            body["model"] = outside
+            for _ in range(60):
+                with ThreadPoolExecutor(max_workers=16) as pool:
+                    control = list(pool.map(call, range(32)))
+                if all(
+                    code == 200 and content == "OLD_UNMANAGED"
+                    for code, content in control
+                ):
+                    break
+                time.sleep(1)
+            else:
+                self.fail("Outside provider control did not become ready")
+            body["model"] = name
         patched = self.client.patch(
             "/model/" + model_id + "/update",
             json={
@@ -66,6 +101,19 @@ class SubscriptionConversionTests(base.SubscriptionModelTests):
             },
         )
         self.assertEqual(patched.status_code, 200, patched.text)
+        if failing:
+            self.control(status=503, clear=True)
+            body.update(fallbacks=[{name: [outside]}], disable_fallbacks=False)
+            with ThreadPoolExecutor(max_workers=16) as pool:
+                failed = list(pool.map(call, range(32)))
+            self.assertTrue(
+                all(
+                    code >= 400 and content != "OLD_UNMANAGED"
+                    for code, content in failed
+                ),
+                failed,
+            )
+            return
         self.control(clear=True)
         creator = self.client.post("/v1/chat/completions", json=body)
         self.assertEqual(creator.status_code, 200, creator.text)
@@ -85,6 +133,9 @@ def load_tests(loader, tests, pattern):
         [
             SubscriptionConversionTests(
                 "test_unmanaged_conversion_is_enforced_on_other_worker"
-            )
+            ),
+            SubscriptionConversionTests(
+                "test_converted_model_cannot_fall_back_to_unassigned_provider"
+            ),
         ]
     )
