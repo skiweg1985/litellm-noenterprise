@@ -54,7 +54,8 @@ export function settingsError(error: unknown): Detail {
   }
   return {
     code: "configuration_unavailable",
-    message: "The request could not be completed. Your active configuration has not changed.",
+    message:
+      "The server response could not be confirmed. Your edits are still here. Reload saved settings to check the active configuration.",
     errors: [],
   };
 }
@@ -79,7 +80,9 @@ export function ErrorFeedback({ error, reload }: { error: Detail | null; reload:
           ))}
         </ul>
       )}
-      {(error.code === "revision_conflict" || error.code === "file_managed") && (
+      {(error.code === "revision_conflict" ||
+        error.code === "file_managed" ||
+        error.code === "configuration_unavailable") && (
         <Button type="button" variant="outline" onClick={reload}>
           Reload saved settings
         </Button>
@@ -110,7 +113,7 @@ export function Confirmation({
         <AlertDialogTitle>{kind === "disable" ? "Disable OpenID Connect?" : "Discard unsaved edits?"}</AlertDialogTitle>
         <AlertDialogDescription>
           {kind === "disable"
-            ? "Independent OpenID Connect sessions will stop working. Native administrator recovery remains available, and any configured legacy SSO takes over. Users, MCP connections and saved settings are retained."
+            ? "Independent OpenID Connect sessions will stop working. Native administrator recovery remains available, and any configured legacy SSO takes over. Users, MCP connections and saved settings are retained. Unsaved form edits will be discarded."
             : "Your unsaved form changes will be discarded and replaced with the latest saved settings."}
         </AlertDialogDescription>
         <AlertDialogFooter>
