@@ -45,12 +45,15 @@ if (subscriptions) {
       "from fastapi import FastAPI",
       "from litellm.proxy.extensions.chatgpt_subscriptions.accounts import Accounts",
       "from litellm.proxy.extensions.chatgpt_subscriptions.admin import router",
+      "from litellm.proxy.extensions.chatgpt_subscriptions.model_assignment import SubscriptionAssignment",
       "with tempfile.TemporaryDirectory() as directory:",
       "    os.environ['CHATGPT_TOKEN_DIR'] = directory",
       "    os.environ['CHATGPT_ACCOUNTS'] = 'default'",
       "    app = FastAPI()",
       "    for part in router(Accounts(), {}, dependency=lambda: None): app.include_router(part)",
-      "    with open(sys.argv[1], 'w') as f: json.dump(app.openapi(), f, sort_keys=True)",
+      "    spec = app.openapi()",
+      "    spec['components']['schemas']['SubscriptionAssignment'] = SubscriptionAssignment.model_json_schema()",
+      "    with open(sys.argv[1], 'w') as f: json.dump(spec, f, sort_keys=True)",
     ].join("\n");
 } else if (personalMcp) {
   dumpSpec = [

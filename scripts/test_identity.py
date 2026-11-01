@@ -106,6 +106,7 @@ mcp_servers:
     authorization_url: http://mcp-upstream:8090/oauth/authorize
     token_url: http://mcp-upstream:8090/oauth/token
 general_settings:
+  store_model_in_db: true
   master_key: sk-identity-test-only
   oidc_api:
     resource: http://proxy:4000
@@ -209,6 +210,13 @@ general_settings:
             "/work/tests/identity/fixtures/mcp_server.py",
         )
         run(
+            "chatgpt",
+            *(["-p", "127.0.0.1:8091:8091"] if args.browser else []),
+            *mount,
+            "--entrypoint", "python", args.image,
+            "/work/tests/identity/fixtures/chatgpt.py",
+        )
+        run(
             "issuer",
             *(["-p", "127.0.0.1:8080:8080"] if args.browser else []),
             *mount,
@@ -234,6 +242,11 @@ general_settings:
             "LITELLM_DANGEROUSLY_PERMIT_WEAK_OR_UNSET_MASTER_KEY=true",
             "-e",
             "OIDC_TEST_CLIENT_SECRET=fixture-only",
+            "-e", "CHATGPT_AUTH_BASE=http://chatgpt:8091",
+            "-e", "CHATGPT_API_BASE=http://chatgpt:8091",
+            "-e", "CHATGPT_MODELS_URL=http://chatgpt:8091/models",
+            "-e", "CHATGPT_USAGE_URL=http://chatgpt:8091/usage",
+            "-e", "CHATGPT_DEVICE_POLL_MIN_SECONDS=1",
             "-e",
             "LITELLM_OIDC_SESSION_SECRET=fixture-session-secret-32-characters-minimum",
             args.image,
@@ -323,7 +336,7 @@ general_settings:
         print(result.stderr)
         if result.returncode:
             raise RuntimeError("identity acceptance tests failed")
-        if args.test_pattern in ("test*.py", "test_mcp.py"):
+        if args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py"):
             docker("restart", prefix + "-proxy")
             for _ in range(90):
                 ready = docker(
@@ -339,29 +352,24 @@ general_settings:
                 time.sleep(1)
             else:
                 raise RuntimeError("proxy did not restart")
-            persistence = docker(
-                "run",
-                "--rm",
-                "--network",
-                prefix,
-                *mount,
-                "-e",
-                "MCP_RESTART_PHASE=read",
-                "--workdir",
-                "/work/tests/identity",
-                "--entrypoint",
-                "python",
-                args.image,
-                "-m",
-                "unittest",
-                "-v",
-                "test_mcp.PersonalMCPTests.test_connection_survives_cold_restart",
-                check=False,
-            )
-            print(persistence.stdout)
-            print(persistence.stderr)
-            if persistence.returncode:
-                raise RuntimeError("managed MCP cold-restart persistence failed")
+            restart_tests = []
+            if args.test_pattern in ("test*.py", "test_mcp.py"):
+                restart_tests.append("test_mcp.PersonalMCPTests.test_connection_survives_cold_restart")
+            if args.test_pattern in ("test*.py", "test_subscription_models.py"):
+                restart_tests.append("test_subscription_models.SubscriptionModelTests.test_assignment_survives_restart")
+            for test in restart_tests:
+                persistence = docker(
+                    "run", "--rm", "--network", prefix, *mount,
+                    "-e", "MCP_RESTART_PHASE=read",
+                    "-e", "SUBSCRIPTION_RESTART_PHASE=read",
+                    "--workdir", "/work/tests/identity",
+                    "--entrypoint", "python", args.image,
+                    "-m", "unittest", "-v", test, check=False,
+                )
+                print(persistence.stdout)
+                print(persistence.stderr)
+                if persistence.returncode:
+                    raise RuntimeError("cold-restart persistence failed: " + test)
         logs = docker("logs", prefix + "-proxy", check=False)
         if any(
             marker in logs.stdout + logs.stderr

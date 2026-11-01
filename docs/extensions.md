@@ -51,7 +51,23 @@ only if unattended device-authorization initiation is desired. Existing signed-i
 accounts refresh in the background. Starting the unconfigured image does not
 connect a ChatGPT account or consume subscription quota.
 
-Map each ChatGPT model deployment to an explicit account alias:
+To publish a model in the dashboard, choose **Add model** beside an available
+model on the subscription card. The native model form preselects the subscription
+and model; choose a unique public model name and save. Alternatively, select
+**ChatGPT Subscription** in **Models + Endpoints → Add Model**, then choose a
+connected subscription and its offered model. Existing database models can change
+their subscription in the model edit form. Configuration-backed models display
+their assignment but remain read-only.
+
+The server checks the selected subscription and current model catalog when saving.
+If the catalog is unavailable, retry after refreshing the connection. Existing
+models remain visible. A fixed assignment cannot fall back to another model or
+use a caller-supplied subscription selector; disconnecting its account makes new
+requests fail until it is connected again. Multiple deployments cannot share a
+fixed-assignment public name. Changes use the existing database model storage and
+survive proxy restarts.
+
+Configuration-managed deployments can still use an explicit account alias:
 
 ```yaml
 credential_list:
