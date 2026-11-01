@@ -1,3 +1,5 @@
+import { SubscriptionModelFields } from "../subscriptions/SubscriptionModelFields";
+import { isChatGPTModel } from "../subscriptions/modelAssignment";
 import { useProviderFields } from "@/app/(dashboard)/hooks/providers/useProviderFields";
 import { useGuardrails } from "@/app/(dashboard)/hooks/guardrails/useGuardrails";
 import { useTags } from "@/app/(dashboard)/hooks/tags/useTags";
@@ -103,6 +105,7 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
   const { data: tagsList } = useTags();
   const selectedCredentialName = useWatch({ control: form.control, name: "litellm_credential_name" });
   const pickedProvider = useWatch({ control: form.control, name: "custom_llm_provider" });
+  const isSubscription = isChatGPTModel({ custom_llm_provider: pickedProvider ?? selectedProvider });
   const queryClient = useQueryClient();
   const [isFederatedCredentialModalOpen, setIsFederatedCredentialModalOpen] = useState(false);
   const canCreateFederatedCredential =
@@ -258,11 +261,15 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
                           />
                         )}
                       </MountedFormField>
-                      <LiteLLMModelNameField
-                        selectedProvider={selectedProvider}
-                        providerModels={providerModels}
-                        getPlaceholder={getPlaceholder}
-                      />
+                      {isSubscription ? (
+                        <SubscriptionModelFields accessToken={accessToken} />
+                      ) : (
+                        <LiteLLMModelNameField
+                          selectedProvider={selectedProvider}
+                          providerModels={providerModels}
+                          getPlaceholder={getPlaceholder}
+                        />
+                      )}
                       <DecisionModelNote catalog={decisionCatalog} litellmProvider={pickedLitellmProvider} />
 
                       {/* Conditionally Render "Public Model Name" */}
@@ -309,52 +316,56 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
                         </div>
                       </div>
 
-                      {/* Credentials */}
-                      <div className="mb-4">
-                        <span className="text-sm text-muted-foreground">
-                          Either select existing credentials OR enter new provider credentials below
-                        </span>
-                      </div>
-
-                      <MountedFormField
-                        label="Existing Credentials"
-                        name="litellm_credential_name"
-                        defaultValue={null}
-                        className="mb-4"
-                      >
-                        {(control) => (
-                          <SearchSelect
-                            inputId={control.id}
-                            placeholder="Select or search for existing credentials"
-                            options={credentialSelectOptions}
-                            value={(control.value as string | null | undefined) ?? ""}
-                            onValueChange={(value) => control.onChange(value === "" ? null : value)}
-                          />
-                        )}
-                      </MountedFormField>
-
-                      {/* Only show provider specific fields if no credentials selected */}
-                      {!selectedCredentialName && (
+                      {!isSubscription && (
                         <>
-                          <div className="flex items-center my-4">
-                            <div className="grow border-t border-border"></div>
-                            <span className="px-4 text-muted-foreground text-sm">OR</span>
-                            <div className="grow border-t border-border"></div>
+                          {/* Credentials */}
+                          <div className="mb-4">
+                            <span className="text-sm text-muted-foreground">
+                              Either select existing credentials OR enter new provider credentials below
+                            </span>
                           </div>
-                          <ProviderSpecificFields selectedProvider={selectedProvider} />
-                          {canCreateFederatedCredential && (
-                            <div className="mb-4 flex flex-col items-start gap-2">
-                              <span className="text-sm text-muted-foreground">
-                                Workload identity federation is saved as a credential, then attached to this model.
-                              </span>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => setIsFederatedCredentialModalOpen(true)}
-                              >
-                                Use workload identity federation
-                              </Button>
-                            </div>
+
+                          <MountedFormField
+                            label="Existing Credentials"
+                            name="litellm_credential_name"
+                            defaultValue={null}
+                            className="mb-4"
+                          >
+                            {(control) => (
+                              <SearchSelect
+                                inputId={control.id}
+                                placeholder="Select or search for existing credentials"
+                                options={credentialSelectOptions}
+                                value={(control.value as string | null | undefined) ?? ""}
+                                onValueChange={(value) => control.onChange(value === "" ? null : value)}
+                              />
+                            )}
+                          </MountedFormField>
+
+                          {/* Only show provider specific fields if no credentials selected */}
+                          {!selectedCredentialName && (
+                            <>
+                              <div className="flex items-center my-4">
+                                <div className="grow border-t border-border"></div>
+                                <span className="px-4 text-muted-foreground text-sm">OR</span>
+                                <div className="grow border-t border-border"></div>
+                              </div>
+                              <ProviderSpecificFields selectedProvider={selectedProvider} />
+                              {canCreateFederatedCredential && (
+                                <div className="mb-4 flex flex-col items-start gap-2">
+                                  <span className="text-sm text-muted-foreground">
+                                    Workload identity federation is saved as a credential, then attached to this model.
+                                  </span>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => setIsFederatedCredentialModalOpen(true)}
+                                  >
+                                    Use workload identity federation
+                                  </Button>
+                                </div>
+                              )}
+                            </>
                           )}
                         </>
                       )}
@@ -469,7 +480,12 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
                         variant="outline"
                         data-testid="test-connect-btn"
                         onClick={handleTestConnection}
-                        disabled={isTestingConnection}
+                        disabled={isTestingConnection || isSubscription}
+                        title={
+                          isSubscription
+                            ? "Save the model first, then use Test Connection from its details."
+                            : undefined
+                        }
                         aria-busy={isTestingConnection}
                       >
                         Test Connect

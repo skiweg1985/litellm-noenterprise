@@ -1,3 +1,4 @@
+import { isChatGPTModel, withFixedSubscription } from "./subscriptions/modelAssignment";
 import { useModelCostMap } from "@/app/(dashboard)/hooks/models/useModelCostMap";
 import { useModelHub, useModelsInfo } from "@/app/(dashboard)/hooks/models/useModels";
 import { useQueryClient } from "@tanstack/react-query";
@@ -343,7 +344,9 @@ export default function ModelInfoView({
       }
 
       const storedCredentialName: string | null = localModelData?.litellm_params?.litellm_credential_name ?? null;
-      const selectedCredentialName: string | null = values.litellm_credential_name ?? null;
+      const selectedCredentialName: string | null = values.subscription_id
+        ? null
+        : values.litellm_credential_name ?? null;
       if (selectedCredentialName !== storedCredentialName) {
         updatedLitellmParams.litellm_credential_name = selectedCredentialName;
       } else {
@@ -400,7 +403,9 @@ export default function ModelInfoView({
       // seeds this form masks secrets, and any save re-sends the whole params blob;
       // without this strip a masked value would be re-encrypted over the real secret.
       // Credential rotation has its own dedicated path (UpdateModelCredentialsModal).
-      const safeLitellmParams = stripMaskedSecrets(updatedLitellmParams);
+      const assigned = withFixedSubscription(updatedLitellmParams, updatedModelInfo ?? {}, values.subscription_id);
+      updatedModelInfo = assigned.info;
+      const safeLitellmParams = stripMaskedSecrets(assigned.params);
       const { litellm_credential_name: _sentCredential, ...localLitellmParams } = safeLitellmParams;
 
       const updateData = {
@@ -599,7 +604,7 @@ export default function ModelInfoView({
             </Button>
           )}
 
-          {!isAnyAutoRouter && (
+          {!isAnyAutoRouter && !isChatGPTModel(modelData.litellm_params ?? {}) && (
             <>
               <Button
                 variant="outline"

@@ -1,5 +1,6 @@
 "use client";
 
+import { parseAsStringLiteral, useQueryState } from "nuqs";
 import { useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -39,6 +40,18 @@ type ModelTabSlug =
   | "price-data";
 
 const BASE_TAB_KEY = "all-models";
+const modelTabParser = parseAsStringLiteral([
+  BASE_TAB_KEY,
+  "add",
+  "auto-routers",
+  "llm-credentials",
+  "pass-through",
+  "health",
+  "retry-settings",
+  "model-group-alias",
+  "access-group-budgets",
+  "price-data",
+] as const).withDefault(BASE_TAB_KEY);
 
 const TAB_LABELS: Record<ModelTabSlug, string> = {
   add: "Add Model",
@@ -87,7 +100,7 @@ export default function ModelsAndEndpointsPage() {
   const { modelId, teamId, close } = useModelDetailRouting();
   const { availableModelAccessGroups, allModelsOnProxy } = useModelDashboardData();
 
-  const [activeKey, setActiveKey] = useState<string>(BASE_TAB_KEY);
+  const [activeKey, setActiveKey] = useQueryState("tab", modelTabParser);
   const [lastRefreshed, setLastRefreshed] = useState("");
 
   const isInternalUser = userRole && internalUserRoles.includes(userRole);
@@ -191,7 +204,10 @@ export default function ModelsAndEndpointsPage() {
             modelAccessGroups={availableModelAccessGroups}
           />
         ) : (
-          <Tabs value={activeKey} onValueChange={setActiveKey}>
+          <Tabs
+            value={visibleSlugs.some((slug) => (slug || BASE_TAB_KEY) === activeKey) ? activeKey : BASE_TAB_KEY}
+            onValueChange={(value) => void setActiveKey(modelTabParser.parse(value) ?? BASE_TAB_KEY)}
+          >
             <div className="flex min-w-0 flex-nowrap items-center gap-3 border-b">
               <div className="no-scrollbar scroll-fade-e -mb-1.5 min-w-0 flex-1 overflow-x-auto pb-1.5">
                 <TabsList variant="line" className="w-max justify-start">

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { subscriptionModelHref } from "@/components/subscriptions/modelPrefill";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, UseMutationOptions, UseQueryOptions } from "@tanstack/react-query";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
@@ -214,6 +216,7 @@ function PendingAccount({
 }
 
 function SubscriptionModels({ account }: { account: SubscriptionAccount }) {
+  const canAddModel = account.token_valid && !account.retired && account.subscription_id;
   return (
     <section className="space-y-2">
       <h3 className="font-semibold">Subscription models</h3>
@@ -228,6 +231,15 @@ function SubscriptionModels({ account }: { account: SubscriptionAccount }) {
               >
                 {model.slug}
                 <span className="ml-2 text-muted-foreground">{model.configured ? "Configured" : "Not configured"}</span>
+                {canAddModel && (
+                  <Link
+                    className="ml-2 text-primary underline"
+                    href={subscriptionModelHref(account.subscription_id!, model.slug)}
+                    aria-label={`Add model ${model.slug}`}
+                  >
+                    Add model
+                  </Link>
+                )}
               </li>
             ))}
           </ul>

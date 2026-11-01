@@ -9,6 +9,22 @@ import { useForm } from "react-hook-form";
 import AddModelForm from "./AddModelForm";
 import { EMPTY_DECISION_CATALOG } from "@/lib/decisionModels";
 
+vi.mock("@/lib/http/chatgptSubscriptions", () => ({
+  getSubscriptions: vi.fn().mockResolvedValue({
+    accounts: [
+      {
+        account: "fixture",
+        subscription_id: "subscription-one",
+        display_name: "Development",
+        token_valid: true,
+        retired: false,
+        available_models: { models: [{ slug: "example-model", name: "Example" }], missing: [] },
+      },
+    ],
+    problems: [],
+  }),
+}));
+
 vi.mock("../molecules/models/ProviderLogo", () => ({
   ProviderLogo: ({ provider, className }: { provider: string; className?: string }) => (
     <div className={className} data-testid={`provider-logo-${provider}`}>
@@ -579,4 +595,17 @@ describe("AddModelForm", () => {
       expect(values).not.toHaveProperty("cache_control_injection_points");
     });
   });
+});
+
+it("uses a subscription picker instead of API credentials for ChatGPT models", async () => {
+  const auth = vi.mocked(await import("@/app/(dashboard)/hooks/useAuthorized"));
+  auth.default.mockReturnValue(mockAuthorizedUser("proxy_admin", "user-1", true));
+  const props = createTestProps();
+  props.form.setValue("custom_llm_provider", "CHATGPT");
+  renderWithProviders(<AddModelForm {...props} selectedProvider="CHATGPT" />);
+  await userEvent.click(await screen.findByRole("combobox", { name: "ChatGPT subscription" }));
+  await userEvent.click(await screen.findByRole("option", { name: "Development" }));
+  expect(props.form.getValues("subscription_id")).toBe("subscription-one");
+  expect(screen.queryByRole("combobox", { name: "Existing Credentials" })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
 });

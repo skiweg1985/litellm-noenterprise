@@ -1,10 +1,27 @@
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders as render, screen } from "../../tests/test-utils";
 import userEvent, { PointerEventsCheckLevel } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { CredentialItem } from "@/components/networking";
 
 import ModelInfoEditForm from "./ModelInfoEditForm";
+
+vi.mock("@/lib/http/chatgptSubscriptions", () => ({
+  getSubscriptions: vi.fn().mockResolvedValue({
+    accounts: [
+      {
+        account: "fixture",
+        subscription_id: "subscription-one",
+        display_name: "Development",
+        token_valid: true,
+        retired: false,
+        deployment_ids: ["model-one"],
+        available_models: { models: [{ slug: "example-model", name: "Example" }], missing: [] },
+      },
+    ],
+    problems: [],
+  }),
+}));
 
 vi.mock("@/components/networking", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/networking")>();
@@ -26,6 +43,7 @@ const credentialsList: CredentialItem[] = [
 const renderForm = ({
   onSubmit = vi.fn().mockResolvedValue(undefined),
   isEditing = true,
+  modelInfo = {} as Record<string, unknown>,
   litellmParams = { model: "gpt-4o" } as Record<string, unknown>,
 } = {}) =>
   render(
@@ -33,7 +51,7 @@ const renderForm = ({
       localModelData={{
         model_name: "gpt-4o",
         litellm_params: litellmParams,
-        model_info: {},
+        model_info: modelInfo,
       }}
       modelData={{ model_info: {} }}
       teamAlias={null}
@@ -127,4 +145,22 @@ describe("ModelInfoEditForm existing-credentials picker", () => {
     renderForm({ isEditing: false });
     expect(screen.getByText("Manual")).toBeInTheDocument();
   });
+});
+
+it("shows a legacy subscription by deployment identity and submits its stable ID", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  renderForm({
+    onSubmit,
+    modelInfo: { id: "model-one", db_model: true },
+    litellmParams: { model: "chatgpt/example-model" },
+  });
+  const picker = await screen.findByRole("combobox", { name: "ChatGPT subscription" });
+  await screen.findByText("Fixed subscription: requests use only this account.");
+  expect(picker).toHaveValue("Development");
+  expect(screen.queryByText("Existing Credentials")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+  expect(onSubmit).toHaveBeenCalledWith(
+    expect.objectContaining({ subscription_id: "subscription-one" }),
+    expect.any(Function),
+  );
 });

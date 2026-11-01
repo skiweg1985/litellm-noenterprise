@@ -4203,6 +4203,8 @@ class Router:
             kwargs.pop(key, None)
         self._merge_tools_from_deployment(deployment=deployment, kwargs=kwargs)
 
+        from litellm.proxy.extensions.chatgpt_subscriptions.routing import pin_subscription_credentials
+        pin_subscription_credentials(deployment, kwargs)
         model_info = deployment.get("model_info", {}).copy()
         deployment_litellm_model_name = deployment["litellm_params"]["model"]
         deployment_api_base = deployment["litellm_params"].get("api_base")
@@ -7929,7 +7931,9 @@ class Router:
                 if model_group is not None:
                     _fallback_metadata["original_model_group"] = model_group
         include_fallback_errors: Final = kwargs.get("include_fallback_errors", False) is True
-        disable_fallbacks: Final[bool | None] = kwargs.pop("disable_fallbacks", False)
+        from litellm.proxy.extensions.chatgpt_subscriptions.routing import fixed_subscription_group
+        requested_disable_fallbacks = kwargs.pop("disable_fallbacks", False)
+        disable_fallbacks: Final[bool | None] = fixed_subscription_group(self, model_group) or requested_disable_fallbacks
         record_disable_fallbacks(kwargs, disable_fallbacks is True)
         fallbacks: Final[list | None] = kwargs.get("fallbacks", self.fallbacks)
         context_window_fallbacks: list | None = kwargs.get("context_window_fallbacks", self.context_window_fallbacks)

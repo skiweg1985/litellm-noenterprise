@@ -1,5 +1,7 @@
 "use client";
 
+import { SubscriptionEditField } from "./subscriptions/SubscriptionEditField";
+import { isChatGPTModel } from "./subscriptions/modelAssignment";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CircleHelp } from "lucide-react";
 import type { Dayjs } from "dayjs";
@@ -14,9 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { SearchSelect } from "@/components/shared/SearchSelect";
-import { credentialOptions } from "@/components/shared/credentialOptions";
-import { AttachedCredential, CredentialNameHint } from "@/components/shared/CredentialIdentity";
+import { AttachedCredential } from "@/components/shared/CredentialIdentity";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -31,6 +31,7 @@ import type { Team } from "./key_team_helpers/key_list";
 import type { CredentialItem } from "./networking";
 import NumericalInput from "./shared/numerical_input";
 import type { Tag } from "./tag_management/types";
+import { ModelCredentialField } from "./view_model/ModelCredentialField";
 import { ModelTeamSelect } from "./view_model/ModelTeamSelect";
 import VectorStoreSelector from "./vector_store_management/VectorStoreSelector";
 import { formatPtuUtcDisplay, utcIsoToPickerValue } from "../utils/ptuDatetime";
@@ -105,6 +106,7 @@ export interface ModelEditFormValues {
   vector_store_ids?: string[];
   tags?: string[];
   health_check_model?: string | null;
+  subscription_id?: string | null;
   litellm_credential_name?: string | null;
   litellm_extra_params?: string;
   model_info?: string;
@@ -142,6 +144,7 @@ const modelEditShape = {
   vector_store_ids: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   health_check_model: z.string().nullish(),
+  subscription_id: z.string().nullish(),
   litellm_credential_name: z.string().nullish(),
   litellm_extra_params: textish,
   model_info: textish,
@@ -164,6 +167,13 @@ const buildSchema = (ptuEnabled: boolean, isFieldTouched: (field: TouchedPricing
 
     if (values.litellm_extra_params && !isJson(values.litellm_extra_params)) {
       reject("litellm_extra_params", "Please enter valid JSON");
+    }
+
+    if (
+      isChatGPTModel({ model: values.litellm_model_name, custom_llm_provider: values.custom_llm_provider }) &&
+      !values.subscription_id
+    ) {
+      reject("subscription_id", "Select a subscription.");
     }
 
     // antd validates only mounted fields, and the PTU block does not render when the flag is off.
@@ -214,7 +224,7 @@ const perMillionTokens = (...rates: (number | null | undefined)[]): number | nul
 
 export const toModelEditFormValues = (localModelData: any, isWildcardModel: boolean): ModelEditFormValues => ({
   model_name: localModelData.model_name,
-  litellm_model_name: localModelData.litellm_model_name,
+  litellm_model_name: localModelData.litellm_model_name ?? localModelData.litellm_params?.model,
   api_base: localModelData.litellm_params.api_base,
   custom_llm_provider: localModelData.litellm_params.custom_llm_provider,
   organization: localModelData.litellm_params.organization,
@@ -257,6 +267,7 @@ export const toModelEditFormValues = (localModelData: any, isWildcardModel: bool
   tags: Array.isArray(localModelData.litellm_params?.tags) ? localModelData.litellm_params.tags : [],
   // antd never mounted this field for a non-wildcard model, so the key must be absent, not null.
   ...(isWildcardModel ? { health_check_model: localModelData.model_info?.health_check_model } : {}),
+  subscription_id: localModelData.model_info?.subscription_assignment?.subscription_ids?.[0] ?? null,
   litellm_credential_name: localModelData.litellm_params?.litellm_credential_name ?? null,
   litellm_extra_params: JSON.stringify(
     Object.fromEntries(
@@ -633,38 +644,29 @@ const ModelInfoEditForm: React.FC<ModelInfoEditFormProps> = ({
               )}
             </div>
 
-            <div>
-              <FieldLabel>Existing Credentials</FieldLabel>
-              {isEditing ? (
-                <FormField control={form.control} name="litellm_credential_name">
-                  {({ id, value, onChange }) => (
-                    <>
-                      <SearchSelect
-                        inputId={id}
-                        placeholder="Select or search for existing credentials"
-                        options={credentialOptions(credentialsList)}
-                        value={(value as string | null) ?? ""}
-                        allowClear={false}
-                        onValueChange={(selected) => {
-                          if (selected !== null) onChange(selected === "" ? null : selected);
-                        }}
-                      />
-                      <CredentialNameHint
-                        credentialName={value as string | null | undefined}
-                        credentials={credentialsList}
-                      />
-                    </>
-                  )}
-                </FormField>
-              ) : (
-                <Display>
-                  <AttachedCredential
-                    credentialName={localModelData.litellm_params?.litellm_credential_name}
-                    credentials={credentialsList}
-                  />
-                </Display>
-              )}
-            </div>
+            {isChatGPTModel(localModelData.litellm_params ?? {}) ? (
+              <SubscriptionEditField
+                form={form}
+                accessToken={accessToken}
+                deploymentId={localModelData.model_info?.id}
+                editable={isEditing}
+                isDbModel={localModelData.model_info?.db_model === true}
+              />
+            ) : (
+              <div>
+                <FieldLabel>Existing Credentials</FieldLabel>
+                {isEditing ? (
+                  <ModelCredentialField form={form} credentials={credentialsList} />
+                ) : (
+                  <Display>
+                    <AttachedCredential
+                      credentialName={localModelData.litellm_params?.litellm_credential_name}
+                      credentials={credentialsList}
+                    />
+                  </Display>
+                )}
+              </div>
+            )}
 
             {isWildcardModel && (
               <div>

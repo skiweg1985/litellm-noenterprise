@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 import litellm
 from litellm._logging import verbose_proxy_logger
 from litellm._uuid import uuid
+from litellm.proxy.extensions.chatgpt_subscriptions.model_assignment import validate_model_assignment
 from litellm.constants import LITELLM_PROXY_ADMIN_NAME
 from litellm.litellm_core_utils.credential_accessor import CredentialAccessor
 from litellm.litellm_core_utils.get_model_cost_map import GetModelCostMap
@@ -1107,6 +1108,11 @@ def update_db_model(
                 merged_litellm_params.pop(field, None)
         for field in _explicitly_cleared_ptu_fields(updated_patch.model_info):
             merged_model_info.pop(field, None)
+        if (
+            "subscription_assignment" in updated_patch.model_info.model_fields_set
+            and getattr(updated_patch.model_info, "subscription_assignment", None) is None
+        ):
+            merged_model_info.pop("subscription_assignment", None)
 
     _validate_ptu_model_info(merged_model_info)
     ptu_pricing, ptu_released = _ptu_pricing_delta(
@@ -1222,6 +1228,7 @@ async def patch_model(
             incoming_model_params=patch_data,
         )
         member_write: Final = write_authorization if isinstance(write_authorization, MemberAutoRouterWrite) else None
+        await validate_model_assignment(patch_data, user_api_key_dict, db_model, llm_router)
         member_marker: Final = _member_auto_router_marker_for_update(
             incoming_params=patch_data.litellm_params, existing=db_model, member_write=member_write
         )
@@ -2558,6 +2565,8 @@ async def add_new_model(
             member_operation="create",
         )
         member_write: Final = write_authorization if isinstance(write_authorization, MemberAutoRouterWrite) else None
+        from litellm.proxy.proxy_server import llm_router
+        await validate_model_assignment(model_params, user_api_key_dict, router=llm_router)
 
         _reject_non_admin_blocked_flag_on_create(model_params.blocked, user_api_key_dict)
 
@@ -2763,6 +2772,7 @@ async def update_model(
             incoming_model_params=model_params,
         )
         member_write: Final = write_authorization if isinstance(write_authorization, MemberAutoRouterWrite) else None
+        await validate_model_assignment(model_params, user_api_key_dict, deployment, llm_router)
 
         ModelManagementAuthChecks.can_user_attach_credential(
             litellm_params=model_params.litellm_params,
@@ -2819,6 +2829,9 @@ async def update_model(
                 if value is not None or _existing_litellm_params_dict.get(key) is not None
             }
 
+            if getattr(model_params.model_info, "subscription_assignment", None) is not None:
+                merged_dictionary.pop("litellm_credential_name", None)
+
             renamed_to: Final = (
                 model_params.model_name
                 if model_params.model_name not in (None, deployment.model_name)
@@ -2829,6 +2842,8 @@ async def update_model(
                 "litellm_params": json.dumps(merged_dictionary),
                 "updated_by": user_api_key_dict.user_id or LITELLM_PROXY_ADMIN_NAME,
             }
+            if model_params.model_info is not None and "subscription_assignment" in model_params.model_info.model_fields_set:
+                base_update["model_info"] = model_params.model_info.model_dump_json(exclude_none=True)
             renamed_update: Final[PrismaCompatibleUpdateDBModel] = (
                 {**base_update, "model_name": renamed_to} if renamed_to is not None else base_update
             )

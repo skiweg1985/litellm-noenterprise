@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useQueryStates } from "nuqs";
+import { subscriptionPrefillParsers } from "@/components/subscriptions/modelPrefill";
+import { useEffect, useMemo, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { useQueryClient } from "@tanstack/react-query";
 import AddModelForm from "@/components/add_model/AddModelForm";
@@ -21,13 +23,28 @@ const INITIAL_VALUES: MountedFormValues = { litellm_credential_name: null };
 
 export default function AddModelPanel() {
   const { accessToken } = useAuthorized();
-  const form = useForm<MountedFormValues>({ mode: "onChange", defaultValues: INITIAL_VALUES });
+  const [params, setParams] = useQueryStates(subscriptionPrefillParsers);
+  const [prefill] = useState(() => (params.subscription && params.subscription_model ? params : null));
+  const form = useForm<MountedFormValues>({
+    mode: "onChange",
+    defaultValues: prefill
+      ? {
+          ...INITIAL_VALUES,
+          custom_llm_provider: "CHATGPT",
+          subscription_id: prefill.subscription,
+          model: [`chatgpt/${prefill.subscription_model}`],
+        }
+      : INITIAL_VALUES,
+  });
+  useEffect(() => {
+    if (prefill) void setParams({ subscription: null, subscription_model: null });
+  }, [prefill, setParams]);
   const registry = useMountRegistry();
   const queryClient = useQueryClient();
   const { data: modelCostMapData } = useModelCostMap(true, true);
   const { data: credentialsResponse } = useCredentials();
   const { data: teams } = useTeams();
-  const [selectedProvider, setSelectedProvider] = useState<string | null>(Providers.Anthropic);
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(prefill ? "CHATGPT" : Providers.Anthropic);
   const pickedProvider = useWatch({ control: form.control, name: "custom_llm_provider" });
   const providerModels = useMemo(
     () => (typeof pickedProvider === "string" ? getProviderModels(pickedProvider, modelCostMapData) : []),

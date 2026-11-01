@@ -167,6 +167,21 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** SubscriptionAssignment */
+        SubscriptionAssignment: {
+            /**
+             * Mode
+             * @constant
+             */
+            mode: "fixed";
+            /**
+             * Revision
+             * @default null
+             */
+            revision: string | null;
+            /** Subscription Ids */
+            subscription_ids: string[];
+        };
         /**
          * SubscriptionDescription
          * @description Stable public management fields; provider status details remain additive.
@@ -176,6 +191,8 @@ export interface components {
             account: string;
             /** Connection Revision */
             connection_revision: string | null;
+            /** Deployment Ids */
+            deployment_ids?: string[];
             /** Display Name */
             display_name: string;
             /** Models */

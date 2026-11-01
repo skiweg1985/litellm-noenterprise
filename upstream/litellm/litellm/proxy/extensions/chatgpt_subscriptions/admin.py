@@ -34,6 +34,7 @@ class SubscriptionDescription(BaseModel):
     state: str
     token_valid: bool
     models: list[str]
+    deployment_ids: list[str] = Field(default_factory=list)
 
 
 class SubscriptionList(BaseModel):
@@ -228,6 +229,7 @@ def router(accounts, services, dependency=None, deployments=None, requests=None,
             "available_models_error": available_error,
             "credentials": sorted({d["credential"] for d in own} - {None}),
             "models": sorted({d["model_name"] for d in own} - {None}),
+            "deployment_ids": sorted({d["id"] for d in own} - {None}),
             "requests_24h": None if counts is None else sum(counts.get(d["id"], 0) for d in own),
         }
 
