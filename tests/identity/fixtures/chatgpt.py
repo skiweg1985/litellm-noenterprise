@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 
 app = FastAPI()
-state = {"identity": "seat-a", "catalog_error": False, "status": 200, "seen": [], "statuses": [], "stream_error": False, "delay": 0}
+state = {"identity": "seat-a", "catalog_error": False, "status": 200, "seen": [], "statuses": [], "stream_error": False, "delay": 0, "status_by_identity": {}, "requests": []}
 codes = {}
 fixtures = json.loads((Path(__file__).parents[2] / "deployment_patches/fixtures/chatgpt_sse.json").read_text())
 
@@ -23,11 +23,12 @@ def jwt(identity):
 @app.post('/control')
 async def control(request: Request):
     changes = await request.json()
-    for key in ('identity', 'catalog_error', 'status', 'statuses', 'stream_error', 'delay'):
+    for key in ('identity', 'catalog_error', 'status', 'statuses', 'stream_error', 'delay', 'status_by_identity'):
         if key in changes:
             state[key] = changes[key]
     if changes.get('clear'):
         state['seen'] = []
+        state['requests'] = []
     return state
 
 @app.get('/control')
@@ -71,9 +72,15 @@ async def responses(request: Request):
     identity = request.headers.get('chatgpt-account-id')
     state['seen'].append(identity)
     status = state['statuses'].pop(0) if state['statuses'] else state['status']
+    account_status = state['status_by_identity'].get(identity)
+    if isinstance(account_status, list):
+        status = account_status.pop(0) if account_status else status
+    elif account_status is not None:
+        status = account_status
+    response_id = 'resp_' + uuid.uuid4().hex
+    state['requests'].append({'identity': identity, 'status': status, 'response_id': response_id})
     if status != 200:
         return JSONResponse({"error": {"type": "server_error", "message": "Synthetic upstream failure"}}, status_code=status)
-    response_id = 'resp_' + uuid.uuid4().hex
     events = json.loads(json.dumps(fixtures['text']).replace('resp_synthetic', response_id))
     stream_error, delay = state['stream_error'], state['delay']
     async def stream():

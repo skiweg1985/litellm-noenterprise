@@ -135,7 +135,7 @@ class Authenticator:
         """Read token, provider identity and revision from one locked credential generation."""
         from litellm.proxy.extensions.chatgpt_subscriptions import tokens
         from litellm.proxy.extensions.chatgpt_subscriptions.registry import Registry
-        from litellm.proxy.extensions.chatgpt_subscriptions.accounts import Account
+        from litellm.proxy.extensions.chatgpt_subscriptions.accounts import Account, _fingerprint
         from litellm.proxy.extensions.chatgpt_subscriptions.attribution import CredentialSnapshot
         registry = Registry()
         with tokens.locked(registry.lock_path), self._auth_file_lock():
@@ -155,7 +155,7 @@ class Authenticator:
                 account._update(**fields)
             entry = registry.seed([self.account])[self.account]
             snapshot = CredentialSnapshot(
-                entry["subscription_id"], entry["display_name"], revision,
+                entry["subscription_id"], entry["display_name"], revision, _fingerprint(access_token),
             )
             return access_token, account_id, snapshot
 

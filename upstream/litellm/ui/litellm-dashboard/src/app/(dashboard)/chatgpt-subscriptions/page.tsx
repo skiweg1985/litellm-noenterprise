@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { subscriptionLogsLink } from "@/components/logs/request/subscriptionLogRouting";
 import { subscriptionModelHref } from "@/components/subscriptions/modelPrefill";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, UseMutationOptions, UseQueryOptions } from "@tanstack/react-query";
@@ -322,7 +323,7 @@ function AccountDetails({ account }: { account: SubscriptionAccount }) {
       </section>
       <section className="min-w-0 space-y-2">
         <h3 className="font-semibold">Usage</h3>
-        <p className="text-sm">Requests in 24 hours: {account.requests_24h ?? "Unavailable"}</p>
+        <p className="text-sm">Use Observed usage below for recorded subscription activity.</p>
         <p className="break-words text-sm text-muted-foreground">
           {account.models.join(" · ") || "No models assigned"}
         </p>
@@ -436,6 +437,7 @@ function AccountCard({
           </p>
         )}
         <AccountDetails account={account} />
+        <Link className="text-sm text-primary underline" href={subscriptionLogsLink(uiHref("chatgpt-subscriptions/usage/"), { subscription_id: account.subscription_id })}>Observed usage for {subscriptionName(account)}</Link>
         {!account.retired && <SubscriptionModels account={account} />}
       </CardContent>
     </Card>
@@ -632,6 +634,7 @@ function Subscriptions({ accessToken, userId }: { accessToken: string; userId: s
           <p className="mt-1 text-sm text-muted-foreground">Manage the subscription accounts used by this gateway.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link className="self-center text-sm text-primary underline" href={uiHref("chatgpt-subscriptions/usage/")}>Observed usage</Link>
           <Button disabled={unavailable || busy} onClick={() => openNameDialog()}>
             Add subscription
           </Button>
