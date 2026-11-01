@@ -103,6 +103,7 @@ export function Choice({
         {label}
       </label>
       <Select
+        items={Object.fromEntries(items)}
         value={value}
         onValueChange={(next) => {
           if (next !== null) onChange(next);
