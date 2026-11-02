@@ -4,6 +4,7 @@ import concurrent.futures
 import json
 import os
 from pathlib import Path
+import time
 import unittest
 import uuid
 import httpx
@@ -413,3 +414,124 @@ class LinkingTests(unittest.TestCase):
         )
         self.assertEqual(call.status_code, 200, call.text)
         self.assertIn("preserved-personal", call.text)
+
+    def test_user_id_prefix_does_not_revoke_another_users_sessions(self):
+        first = self.native()
+        first_subject, first_email = self.subject, self.email
+        self.assertEqual(self.login().status_code, 403)
+        self.assertEqual(
+            self.action(self.record(), "approve", user_id=first["user_id"]).status_code,
+            200,
+        )
+        self.assertEqual(self.login().status_code, 303)
+        first_browser = self.browser
+        self.subject += "-ops"
+        self.email = self.subject + "@example.test"
+        second = self.client.post(
+            "/user/new",
+            json={"user_id": first["user_id"] + ":ops", "user_email": self.email},
+        ).json()
+        self.browser = httpx.Client(
+            base_url=BASE, trust_env=False, follow_redirects=False
+        )
+        self.addCleanup(self.browser.close)
+        self.assertEqual(self.login().status_code, 403)
+        self.assertEqual(
+            self.action(
+                self.record(), "approve", user_id=second["user_id"]
+            ).status_code,
+            200,
+        )
+        self.assertEqual(self.login().status_code, 303)
+        second_browser = self.browser
+        self.subject, self.email, self.browser = (
+            first_subject,
+            first_email,
+            first_browser,
+        )
+        self.assertEqual(self.login(roles=["access", "admin"]).status_code, 303)
+        self.assertEqual(second_browser.get("/oidc/session").status_code, 200)
+        self.assertEqual(self.action(self.record(), "unlink").status_code, 200)
+        self.assertEqual(first_browser.get("/oidc/session").status_code, 401)
+        self.assertEqual(second_browser.get("/oidc/session").status_code, 200)
+
+    def test_late_callback_cannot_regain_access_after_unlink_and_other_identity_link(
+        self,
+    ):
+        native = self.native()
+        self.assertEqual(self.login().status_code, 403)
+        self.assertEqual(
+            self.action(
+                self.record(), "approve", user_id=native["user_id"]
+            ).status_code,
+            200,
+        )
+        self.assertEqual(self.login().status_code, 303)
+        old_record = self.record()
+        new_subject = self.subject + "-replacement"
+        self.assertEqual(
+            self.client.get(
+                "/models", headers=self.token(oid=new_subject, sub=new_subject)
+            ).status_code,
+            403,
+        )
+        replacement = next(
+            r for r in self.inventory()["links"] if r["subject"] == new_subject
+        )
+        gate = httpx.Client(
+            base_url="http://linking-gate:8093", trust_env=False, timeout=10
+        )
+        self.addCleanup(gate.close)
+        gate.post("/arm", json={"user_id": native["user_id"]}).raise_for_status()
+        self.addCleanup(lambda: gate.post("/release"))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            callback = pool.submit(self.login)
+            deadline = time.monotonic() + 12
+            while not gate.get("/status").json()["insert_waiting"]:
+                if callback.done():
+                    self.fail(
+                        "Callback did not reach the controlled session-insert boundary: "
+                        + callback.result().text
+                    )
+                self.assertLess(
+                    time.monotonic(),
+                    deadline,
+                    "Callback did not reach the fixture gate",
+                )
+                time.sleep(0.05)
+            unlink = pool.submit(self.action, old_record, "unlink")
+            # Observe the database boundary, not an arbitrary scheduling sleep. The
+            # fixed transaction waits for the callback; the old version finishes
+            # unlink before the invisible session insert is committed.
+            while not unlink.done() and not gate.get("/status").json()["other_waiting"]:
+                self.assertLess(
+                    time.monotonic(),
+                    deadline,
+                    "Unlink did not reach its transaction boundary",
+                )
+                time.sleep(0.05)
+            if unlink.done():
+                self.assertEqual(unlink.result().status_code, 200)
+                self.assertEqual(
+                    self.action(
+                        replacement, "approve", user_id=native["user_id"]
+                    ).status_code,
+                    200,
+                )
+                gate.post("/release").raise_for_status()
+            else:
+                gate.post("/release").raise_for_status()
+                self.assertEqual(unlink.result(timeout=15).status_code, 200)
+                self.assertEqual(
+                    self.action(
+                        replacement, "approve", user_id=native["user_id"]
+                    ).status_code,
+                    200,
+                )
+            self.assertIn(callback.result(timeout=15).status_code, (303, 403))
+        self.assertEqual(self.browser.get("/oidc/session").status_code, 401)
+        self.subject = new_subject
+        self.assertEqual(self.login().status_code, 303)
+        self.assertEqual(
+            self.browser.get("/oidc/session").json()["user_id"], native["user_id"]
+        )

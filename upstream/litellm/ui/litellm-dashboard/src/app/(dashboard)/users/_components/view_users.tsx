@@ -365,14 +365,14 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
 
       {isProxyAdmin ? (
         <Tabs defaultValue="users" className="gap-0">
-          <TabsList variant="line" className="mb-4 h-auto flex-wrap">
-            <TabsTrigger value="users" className="flex-none data-active:text-primary after:bg-primary">
+          <TabsList variant="line" className="mb-4 flex-wrap group-data-horizontal/tabs:h-auto">
+            <TabsTrigger value="users" className="h-auto flex-none data-active:text-primary after:bg-primary">
               Users
             </TabsTrigger>
-            <TabsTrigger value="default-settings" className="flex-none data-active:text-primary after:bg-primary">
+            <TabsTrigger value="default-settings" className="h-auto flex-none data-active:text-primary after:bg-primary">
               Default User Settings
             </TabsTrigger>
-            <TabsTrigger value="oidc-links" className="flex-none data-active:text-primary after:bg-primary">
+            <TabsTrigger value="oidc-links" className="h-auto flex-none data-active:text-primary after:bg-primary">
               OIDC Account Links
             </TabsTrigger>
           </TabsList>

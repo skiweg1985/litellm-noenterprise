@@ -177,7 +177,7 @@ async def authenticate_provider(request: Request, api_key: str | None) -> UserAP
         role = browser.role_for(claims)
         authorize_api_route(request, role)
         from litellm.proxy.auth.oidc_links import resolve_account
-        user = await resolve_account(browser, claims)
+        user = (await resolve_account(browser, claims)).user
         user_id = user.user_id
         request.state.oidc_claims = browser.retained_policy_claims(claims)
         request.state.oidc_user_id = user_id

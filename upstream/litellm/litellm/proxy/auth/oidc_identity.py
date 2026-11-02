@@ -14,7 +14,7 @@ import os
 import re
 import secrets
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import quote_plus, urlencode, urlparse
 
@@ -23,7 +23,6 @@ import jwt
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from litellm.constants import UI_SESSION_TOKEN_TEAM_ID
 from litellm.proxy._types import LitellmUserRoles, UserAPIKeyAuth
 from litellm.repositories.user_repository import UserRepository
 from litellm.repositories.verification_token_repository import (
@@ -257,7 +256,7 @@ def session_prefix(user_id: str) -> str:
 
 
 async def revoke_identity_sessions(user_id: str) -> None:
-    await session_repository().table.delete_many(where={"token": {"startswith": session_prefix(user_id)}})
+    await session_repository().table.delete_many(where={"user_id": user_id, "token": {"startswith": session_prefix(user_id)}})
 
 
 async def invalidate_user_auth(user_id: str) -> None:
@@ -272,22 +271,15 @@ async def invalidate_user_auth(user_id: str) -> None:
 
 async def synchronize_account(config: OIDCSettings, claims: dict[str, Any]):
     """Apply the same admission policy for new and existing users, without email linking."""
-    from litellm.proxy.auth.oidc_links import resolve_account, associated_user
+    from litellm.proxy.auth.oidc_links import resolve_account, deny_browser_account
     repository = user_repository()
-    previous = await associated_user(config, claims)
-    user_id = previous.user_id if previous else user_id_for_claims(config, claims)
-    metadata = dict(previous.metadata or {}) if previous else {}
-    old = verified_identity_state(config, user_id, metadata)
     if not config.access_rule.matches(claims):
-        await revoke_identity_sessions(user_id)
-        if previous:
-            metadata[METADATA_KEY] = sign_identity_state(
-                config, user_id, {**old, "active": False, "epoch": secrets.token_urlsafe(24)}
-            )
-            await repository.update(user_id, {"metadata": json.dumps(metadata)}, id_field="user_id")
-        await invalidate_user_auth(user_id)
+        user_id = await deny_browser_account(config, claims)
+        if user_id is not None:
+            await invalidate_user_auth(user_id)
         raise HTTPException(403, "Identity does not satisfy the access rule")
-    previous = await resolve_account(config, claims)
+    resolved = await resolve_account(config, claims)
+    previous = resolved.user
     user_id = previous.user_id
     metadata = dict(previous.metadata or {})
     old = verified_identity_state(config, user_id, metadata)
@@ -295,10 +287,6 @@ async def synchronize_account(config: OIDCSettings, claims: dict[str, Any]):
     policy_claims = config.retained_policy_claims(claims)
     digest = hashlib.sha256(json.dumps([role, policy_claims, config.fingerprint], sort_keys=True).encode()).hexdigest()
     epoch = old.get("epoch") if old.get("active") and old.get("claims_digest") == digest else None
-    if epoch is None:
-        # A signature alone would allow replaying an older valid metadata snapshot.
-        # Destroy its session handles before publishing the replacement policy.
-        await revoke_identity_sessions(user_id)
     metadata[METADATA_KEY] = sign_identity_state(
         config,
         user_id,
@@ -308,6 +296,7 @@ async def synchronize_account(config: OIDCSettings, claims: dict[str, Any]):
             "claims_digest": digest,
             "claims": policy_claims,
             "config": config.fingerprint,
+            "association_revision": resolved.revision,
         },
     )
     values = {"user_role": role, "metadata": json.dumps(metadata)}
@@ -316,7 +305,7 @@ async def synchronize_account(config: OIDCSettings, claims: dict[str, Any]):
     if isinstance(email, str):
         values["user_email"] = email
     from litellm.proxy.auth.oidc_links import update_browser_account
-    await update_browser_account(config, claims, user_id, values)
+    await update_browser_account(config, claims, user_id, resolved.revision, values, revoke_sessions=epoch is None)
     await invalidate_user_auth(user_id)
     return await repository.find_by_id(user_id)
 
@@ -457,6 +446,8 @@ async def complete_login(request: Request):
         raise HTTPException(401, "OIDC token exchange failed") from None
     try:
         user = await synchronize_account(config, claims)
+        from litellm.proxy.auth.oidc_links import issue_browser_session
+        user, state, session_id, link_revision = await issue_browser_session(config, claims, user)
     except HTTPException as exc:
         if isinstance(exc.detail, dict) and exc.detail.get("code") == "linking_required":
             from fastapi.responses import HTMLResponse
@@ -465,25 +456,12 @@ async def complete_login(request: Request):
                 response.delete_cookie(cookie, path="/")
             return response
         raise
-    state = user.metadata[METADATA_KEY]
     role = user.user_role
     response = RedirectResponse(
         "/ui/" if role in ("proxy_admin", "proxy_admin_viewer") else "/ui/connect/", status_code=303
     )
-    session_id = secrets.token_urlsafe(32)
-    session_hash = session_prefix(user.user_id) + hashlib.sha256(session_id.encode()).hexdigest()
-    await session_repository().create(
-        {
-            "token": session_hash,
-            "user_id": user.user_id,
-            "team_id": UI_SESSION_TOKEN_TEAM_ID,
-            "models": [],
-            "blocked": True,
-            "expires": datetime.now(UTC) + timedelta(seconds=config.session_ttl_seconds),
-            "metadata": json.dumps({"noenterprise_oidc_session": True}),
-        }
-    )
-    session = {"user_id": user.user_id, "epoch": state["epoch"], "config": config.fingerprint, "sid": session_id}
+    session = {"user_id": user.user_id, "epoch": state["epoch"], "config": config.fingerprint,
+               "sid": session_id, "identity_key": user.sso_user_id, "link_revision": link_revision}
     set_cookie(response, config, SESSION_COOKIE, seal(config, "session", session), config.session_ttl_seconds)
     # The readable compatibility envelope contains a marker, never a provider token or usable API key.
     from litellm.proxy.proxy_server import master_key
@@ -534,7 +512,7 @@ async def current_session(request: Request):
         raise HTTPException(401, "OIDC browser session has expired")
     user = await user_repository().find_by_id(session.get("user_id", ""))
     from litellm.proxy.auth.oidc_links import association_active
-    if not await association_active(config, user):
+    if not await association_active(config, user, expected_identity=session.get("identity_key"), expected_revision=session.get("link_revision")):
         raise HTTPException(401, "OIDC account association is no longer active")
     state = verified_identity_state(config, user.user_id, user.metadata or {}) if user else {}
     if (

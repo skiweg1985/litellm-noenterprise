@@ -8,11 +8,14 @@ import json
 import secrets
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from typing import Any
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from litellm.constants import UI_SESSION_TOKEN_TEAM_ID
 from litellm.proxy.auth import oidc_identity as identity
 from litellm.proxy.auth.oidc_settings import require_admin
 from litellm.proxy._types import UserAPIKeyAuth
@@ -201,26 +204,66 @@ def new_record(config, claims, key, *, state="pending", user_id=None):
     }
 
 
-async def associated_user(config, claims):
+@dataclass(frozen=True)
+class ResolvedAccount:
+    user: Any
+    revision: int
+
+
+def verified_browser_identity(config, user) -> tuple[str, dict] | None:
+    """One fail-closed predicate for signed legacy adoption and session identity."""
+    if user is None:
+        return None
+    state = identity.verified_identity_state(config, user.user_id, user.metadata or {})
+    claims = state.get("claims")
+    if not isinstance(claims, dict):
+        return None
+    try:
+        key = identity.user_id_for_claims(config, claims)
+    except HTTPException:
+        return None
+    return (key, claims) if key == user.sso_user_id else None
+
+
+async def invalidate_browser_state(tx, config, user):
+    metadata = dict(user.metadata or {})
+    metadata[identity.METADATA_KEY] = identity.sign_identity_state(
+        config,
+        user.user_id,
+        {
+            "active": False,
+            "epoch": secrets.token_urlsafe(24),
+            "config": config.fingerprint,
+        },
+    )
+    await tx.litellm_usertable.update(
+        where={"user_id": user.user_id}, data={"metadata": json.dumps(metadata)}
+    )
+    await tx.litellm_verificationtoken.delete_many(
+        where={
+            "user_id": user.user_id,
+            "token": {"startswith": identity.session_prefix(user.user_id)},
+        }
+    )
+
+
+async def deny_browser_account(config, claims):
+    """A denied old identity cannot revoke a newly relinked user's sessions."""
     key = identity.user_id_for_claims(config, claims)
     async with transaction() as tx:
         record = await load(tx, key)
-        if record:
-            if record["state"] != "linked":
-                return None
+        if record and record["state"] == "linked":
             user = await locked_user(tx, record["user_id"])
-            return user if user and user.sso_user_id == key else None
-        user = await tx.litellm_usertable.find_unique(where={"sso_user_id": key})
-        if user:
-            state = identity.verified_identity_state(
-                config, user.user_id, user.metadata or {}
-            )
-            if (
-                state
-                and identity.user_id_for_claims(config, state.get("claims", {})) == key
-            ):
-                return user
-        return None
+        elif record is None:
+            user = await tx.litellm_usertable.find_unique(where={"sso_user_id": key})
+            if verified_browser_identity(config, user) is None:
+                return None
+        else:
+            return None
+        if user is not None and user.sso_user_id == key:
+            await invalidate_browser_state(tx, config, user)
+            return user.user_id
+    return None
 
 
 async def resolve_account(config, claims):
@@ -238,7 +281,7 @@ async def resolve_account(config, claims):
                         "link_conflict",
                         "The linked account changed. Administrator review is required.",
                     )
-                return user
+                return ResolvedAccount(user, record["revision"])
             # Fresh verified claims refresh the review, never remove rejection/unlink state.
             updated = new_record(config, claims, key)
             if any(
@@ -257,16 +300,13 @@ async def resolve_account(config, claims):
             )
             if existing is not None:
                 # Only integrity-protected pre-linking browser accounts can be adopted.
-                old = identity.verified_identity_state(
-                    config, existing.user_id, existing.metadata or {}
-                )
-                old_claims = old.get("claims", {})
-                if old and identity.user_id_for_claims(config, old_claims) == key:
+                trusted = verified_browser_identity(config, existing)
+                if trusted is not None and trusted[0] == key:
                     record = new_record(
                         config, claims, key, state="linked", user_id=existing.user_id
                     )
                     await save(tx, record)
-                    return existing
+                    return ResolvedAccount(existing, record["revision"])
                 record = new_record(config, claims, key)
                 await save(tx, record)
                 pending = True
@@ -291,14 +331,22 @@ async def resolve_account(config, claims):
                 )
                 record.update(state="linked", user_id=user.user_id)
                 await save(tx, record)
-                return user
+                return ResolvedAccount(user, record["revision"])
     if pending:
         problem(
             403, "linking_required", "Account linking requires administrator review."
         )
 
 
-async def update_browser_account(config, claims, user_id: str, values: dict):
+async def update_browser_account(
+    config,
+    claims,
+    user_id: str,
+    expected_revision: int,
+    values: dict,
+    *,
+    revoke_sessions: bool,
+):
     key = identity.user_id_for_claims(config, claims)
     async with transaction() as tx:
         record = await load(tx, key)
@@ -307,6 +355,7 @@ async def update_browser_account(config, claims, user_id: str, values: dict):
             not record
             or record["state"] != "linked"
             or record["user_id"] != user_id
+            or record["revision"] != expected_revision
             or not user
             or user.sso_user_id != key
         ):
@@ -315,29 +364,93 @@ async def update_browser_account(config, claims, user_id: str, values: dict):
                 "linking_required",
                 "Account linking requires administrator review.",
             )
+        if revoke_sessions:
+            await tx.litellm_verificationtoken.delete_many(
+                where={
+                    "user_id": user_id,
+                    "token": {"startswith": identity.session_prefix(user_id)},
+                }
+            )
         await tx.litellm_usertable.update(where={"user_id": user_id}, data=values)
 
 
-async def association_active(config, user) -> bool:
-    """Browser sessions must not outlive an unlink or generic field modification."""
-    if not user or not user.sso_user_id:
+async def issue_browser_session(config, claims, user):
+    """Create the handle under the same lock as unlink and association changes."""
+    key = identity.user_id_for_claims(config, claims)
+    if user is None:
+        problem(
+            403, "linking_required", "Account linking requires administrator review."
+        )
+    expected = identity.verified_identity_state(
+        config, user.user_id, user.metadata or {}
+    )
+    async with transaction() as tx:
+        record = await load(tx, key)
+        current = await locked_user(tx, user.user_id)
+        state = (
+            identity.verified_identity_state(
+                config, user.user_id, current.metadata or {}
+            )
+            if current
+            else {}
+        )
+        if (
+            not record
+            or record["state"] != "linked"
+            or record["user_id"] != user.user_id
+            or not current
+            or current.sso_user_id != key
+            or not state.get("active")
+            or state.get("epoch") != expected.get("epoch")
+            or state.get("association_revision") != record["revision"]
+            or state.get("config") != config.fingerprint
+            or state.get("claims") != config.retained_policy_claims(claims)
+            or current.user_role != config.role_for(claims)
+        ):
+            problem(
+                403,
+                "linking_required",
+                "Account linking requires administrator review.",
+            )
+        session_id = secrets.token_urlsafe(32)
+        session_hash = (
+            identity.session_prefix(user.user_id)
+            + hashlib.sha256(session_id.encode()).hexdigest()
+        )
+        await tx.litellm_verificationtoken.create(
+            data={
+                "token": session_hash,
+                "user_id": user.user_id,
+                "team_id": UI_SESSION_TOKEN_TEAM_ID,
+                "models": [],
+                "blocked": True,
+                "expires": datetime.now(UTC)
+                + timedelta(seconds=config.session_ttl_seconds),
+                "metadata": json.dumps({"noenterprise_oidc_session": True}),
+            }
+        )
+        return current, state, session_id, record["revision"]
+
+
+async def association_active(
+    config, user, *, expected_identity=None, expected_revision=None
+) -> bool:
+    """Bind browser claims and session generation to the currently linked identity."""
+    trusted = verified_browser_identity(config, user)
+    if trusted is None or (
+        expected_identity is not None and expected_identity != trusted[0]
+    ):
         return False
     async with transaction() as tx:
-        record = await load(tx, user.sso_user_id)
+        record = await load(tx, trusted[0])
         if record is None:
             # Existing signed browser sessions remain usable; next login adopts the link.
-            state = identity.verified_identity_state(
-                config, user.user_id, user.metadata or {}
-            )
-            claims = state.get("claims", {})
-            try:
-                return bool(
-                    state
-                    and identity.user_id_for_claims(config, claims) == user.sso_user_id
-                )
-            except HTTPException:
-                return False
-        return record["state"] == "linked" and record["user_id"] == user.user_id
+            return expected_revision is None
+        return (
+            record["state"] == "linked"
+            and record["user_id"] == user.user_id
+            and (expected_revision is None or record["revision"] == expected_revision)
+        )
 
 
 @router.get("", response_model=LinksResponse)
@@ -357,15 +470,9 @@ async def list_links(auth: UserAPIKeyAuth = Depends(require_admin)):
             for user in users:
                 if not user.sso_user_id or user.sso_user_id in known:
                     continue
-                state = identity.verified_identity_state(
-                    config, user.user_id, user.metadata or {}
-                )
-                claims = state.get("claims", {})
-                try:
-                    key = identity.user_id_for_claims(config, claims) if state else None
-                except HTTPException:
-                    key = None
-                if key and key == user.sso_user_id:
+                trusted = verified_browser_identity(config, user)
+                if trusted is not None:
+                    key, claims = trusted
                     record = new_record(
                         config, claims, key, state="linked", user_id=user.user_id
                     )
@@ -462,13 +569,9 @@ async def change(key: str, action: str, data: RevisionRequest, auth: UserAPIKeyA
                         "link_conflict",
                         "The account association changed. Reload before continuing.",
                     )
+                await invalidate_browser_state(tx, config, user)
                 await tx.litellm_usertable.update(
                     where={"user_id": user.user_id}, data={"sso_user_id": None}
-                )
-                await tx.litellm_verificationtoken.delete_many(
-                    where={
-                        "token": {"startswith": identity.session_prefix(user.user_id)}
-                    }
                 )
                 changed_user = user.user_id
             record.update(state="unlinked")
