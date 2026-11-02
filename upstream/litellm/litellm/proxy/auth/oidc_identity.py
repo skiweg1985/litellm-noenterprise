@@ -29,7 +29,7 @@ from litellm.repositories.user_repository import UserRepository
 from litellm.repositories.verification_token_repository import (
     VerificationTokenRepository,
 )
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError, model_validator
 
 BROWSER_MARKER = "oidc-browser-session"
 SESSION_COOKIE = "litellm_oidc_session"
@@ -85,6 +85,15 @@ class OIDCSettings(BaseModel):
     mcp_access_rules: dict[str, ClaimRule] = Field(default_factory=dict)
     retained_claims: list[str] = Field(default_factory=lambda: ["roles", "groups", "scp", "scope"])
     allow_insecure_http: bool = False
+    _active_revision: int = PrivateAttr(default=0)
+    _client_secret: str | None = PrivateAttr(default=None)
+    _session_secret: str | None = PrivateAttr(default=None)
+
+    def client_secret(self) -> str | None:
+        return self._client_secret if self._client_secret is not None else os.environ.get(self.client_secret_env)
+
+    def session_secret(self) -> str:
+        return self._session_secret if self._session_secret is not None else os.environ.get(self.session_secret_env, "")
 
     @model_validator(mode="after")
     def validate_endpoints(self):
@@ -105,7 +114,10 @@ class OIDCSettings(BaseModel):
 
     @property
     def fingerprint(self) -> str:
-        return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+        value = self.model_dump_json()
+        if self._active_revision:
+            value += "\0" + str(self._active_revision)
+        return hashlib.sha256(value.encode()).hexdigest()
 
     def role_for(self, claims: dict[str, Any]) -> str:
         return next(
@@ -122,6 +134,12 @@ class OIDCSettings(BaseModel):
 def settings() -> OIDCSettings | None:
     from litellm.proxy.proxy_server import general_settings
 
+    from litellm.proxy.auth.oidc_settings import current_snapshot
+    snapshot = current_snapshot.get()
+    if snapshot is not None:
+        if snapshot.error is not None:
+            raise snapshot.error
+        return snapshot.browser
     value = general_settings.get("oidc_identity")
     if value is None:
         return None
@@ -147,7 +165,7 @@ def validate_configuration() -> None:
         raise RuntimeError("OIDC identity cannot be combined with a replacing custom_auth hook")
     if prisma_client is None:
         raise RuntimeError("OIDC requires the user database")
-    if not os.environ.get(config.client_secret_env):
+    if not config.client_secret():
         raise RuntimeError("OIDC client credential is unavailable")
     cipher(config, "session")
 
@@ -160,7 +178,7 @@ def require_settings() -> OIDCSettings:
 
 
 def cipher(config: OIDCSettings, purpose: str) -> Fernet:
-    secret = os.environ.get(config.session_secret_env, "")
+    secret = config.session_secret()
     if len(secret) < 32:
         raise HTTPException(503, "OIDC session secret must contain at least 32 characters")
     key = hashlib.sha256((purpose + "\0" + secret).encode()).digest()
@@ -219,7 +237,7 @@ def sign_identity_state(config: OIDCSettings, user_id: str, state: dict[str, Any
     """Generic user metadata is editable through native keys; authenticate our reserved state."""
     value = {key: item for key, item in state.items() if key != "signature"}
     body = json.dumps([user_id, value], sort_keys=True, separators=(",", ":")).encode()
-    secret = os.environ[config.session_secret_env].encode()
+    secret = config.session_secret().encode()
     signature = hmac.new(secret, b"oidc-identity-state\0" + body, hashlib.sha256).hexdigest()
     return {**value, "signature": signature}
 
@@ -366,7 +384,7 @@ async def verify_id_token(
 @router.get("/login")
 async def begin_login(request: Request):
     config = require_settings()
-    secret = os.environ.get(config.client_secret_env)
+    secret = config.client_secret()
     if not secret:
         raise HTTPException(503, "OIDC client credential is unavailable")
     flow = {
@@ -409,7 +427,7 @@ async def complete_login(request: Request):
     code = request.query_params.get("code")
     if request.query_params.get("error") or not code:
         raise HTTPException(401, "OIDC authorization was not completed")
-    secret = os.environ.get(config.client_secret_env)
+    secret = config.client_secret()
     if not secret:
         raise HTTPException(503, "OIDC client credential is unavailable")
     try:
@@ -475,7 +493,7 @@ async def complete_login(request: Request):
         response,
         config,
         "token",
-        jwt.encode(envelope, master_key or os.environ[config.session_secret_env], algorithm="HS256"),
+        jwt.encode(envelope, master_key or config.session_secret(), algorithm="HS256"),
         config.session_ttl_seconds,
         httponly=False,
     )
