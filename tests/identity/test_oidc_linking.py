@@ -294,17 +294,21 @@ class LinkingTests(unittest.TestCase):
             historical,
         )
 
-    def test_historical_signed_browser_identity_remains_the_same_account(self):
+    def test_00_historical_signed_browser_identity_remains_the_same_account(self):
+        # Run before inventory bootstrap, matching an imported user's first request.
         self.subject = "historical-browser"
         self.email = self.subject + "@example.test"
         before = next(
-            u for u in self.inventory()["users"] if u["user_email"] == self.email
+            u
+            for u in self.client.get("/user/list").json()["users"]
+            if u["user_email"] == self.email
         )
-        self.assertEqual(before["sso_status"], "independent_oidc")
+        self.assertEqual(self.login(roles=[]).status_code, 403)
         self.assertEqual(self.login().status_code, 303)
         self.assertEqual(
             self.browser.get("/oidc/session").json()["user_id"], before["user_id"]
         )
+        self.assertEqual(self.record()["state"], "linked")
 
     def test_legacy_link_conflicts_and_ambiguous_email_never_select_an_account(self):
         self.email = "historical-legacy@example.test"

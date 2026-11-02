@@ -9,8 +9,7 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from dataclasses import dataclass
-from typing import Any
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -258,6 +257,11 @@ async def deny_browser_account(config, claims):
             user = await tx.litellm_usertable.find_unique(where={"sso_user_id": key})
             if verified_browser_identity(config, user) is None:
                 return None
+            # Preserve verified pre-feature provenance before revoking its policy.
+            await save(
+                tx,
+                new_record(config, claims, key, state="linked", user_id=user.user_id),
+            )
         else:
             return None
         if user is not None and user.sso_user_id == key:
