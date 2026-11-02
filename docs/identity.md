@@ -107,14 +107,54 @@ are supported. `retained_claims` controls additional validated claim values
 saved for later policy evaluation; identity, admission, and role claims are
 always retained.
 
+## Link an existing account
+
+Use the OIDC linking controls in user administration when an existing native or
+legacy SSO user needs independent OIDC access. The user first signs in through
+the configured provider. An eligible identity with a matching account candidate
+receives a generic administrator-review message and no LiteLLM session.
+
+As a full administrator, review the pending identity, issuer and stable subject,
+then select the intended existing user. Compare the current account role with
+the proposed OIDC role before approving. Email matching is a suggestion, not
+proof of account ownership. Multiple candidates require an explicit choice;
+an occupied legacy SSO association cannot be overwritten by approval.
+
+Approval links the identity without signing the user in. Ask the user to sign in
+again: fresh provider claims must still satisfy admission, and the configured
+role mappings determine the role. Provider-token requests resolve the same user
+but retain their own token permissions; approval does not broaden an API grant.
+The original user ID, teams, keys, model permissions, budgets, spend history and
+personal MCP connections remain attached to the account.
+
+Reject an incorrect request without changing the underlying account. Reopen a
+rejected or unlinked request only after reviewing the intended association.
+After a configuration change, a new verified sign-in may be required before an
+administrator can approve. On a conflict or uncertain save result, reload the
+current state before retrying.
+
+Unlinking removes independent OIDC access and revokes its browser sessions. It
+keeps the native account, local credentials, API keys, history and personal MCP
+records. The unlinked identity requires deliberate review before relinking;
+changing its email must not silently register a replacement account. This action
+is not global account suspension or revocation at the identity provider.
+
+No schema migration is required. Back up the database and stable encryption
+secrets together. Older images do not enforce these linking decisions: do not
+roll back with independent OIDC active and assume links or unlink restrictions
+will be honored. Use native administrator recovery while assessing rollback.
+This feature does not merge two already-used accounts or transfer their history.
+
 ## Sign in and manage sessions
 
 Open `/oidc/login`, or use the existing `/sso/key/generate` login entry point.
-An eligible first login creates a user identified by issuer and the configured
-stable subject. Repeated login updates that same account, applies the same
-admission rule, and selects the first matching role mapping. An eligible user
-with no matching mapping receives the configured minimal default role.
-Email is informational and never links accounts.
+An eligible first login resolves the issuer and configured stable subject to a
+LiteLLM account. A new identity without an existing account candidate is registered
+automatically. A possible existing account requires administrator review before
+access is granted; see [Link an existing account](#link-an-existing-account).
+Repeated login applies the same admission rule and selects the first matching
+role mapping. An eligible user with no matching mapping receives the configured
+minimal default role. Email can suggest a candidate but never authorizes a link.
 
 Administrators land on `/ui/`; other users land on `/ui/connect/`. With
 `DISABLE_ADMIN_UI=true`, OIDC administrators also use the personal page;
