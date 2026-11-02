@@ -66,6 +66,15 @@ test("administrator reviews, links and unlinks a verified identity without repla
     await expect(
       page.getByRole("tab", { name: "OIDC Account Links", exact: true }),
     ).toBeVisible();
+    const tabBounds = await page
+      .getByRole("tab", { name: "OIDC Account Links", exact: true })
+      .boundingBox();
+    const headingBounds = await page
+      .getByRole("heading", { name: "OIDC account links", exact: true })
+      .boundingBox();
+    expect(tabBounds).not.toBeNull();
+    expect(headingBounds).not.toBeNull();
+    expect(headingBounds!.y).toBeGreaterThan(tabBounds!.y + tabBounds!.height);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -113,7 +122,11 @@ test("administrator reviews, links and unlinks a verified identity without repla
     await dialog
       .getByRole("button", { name: "Confirm link", exact: true })
       .click();
-    await expect(page.getByRole("alert")).toContainText("changed elsewhere");
+    await expect(
+      page
+        .getByRole("region", { name: "OIDC account links", exact: true })
+        .getByRole("alert"),
+    ).toContainText("changed elsewhere");
     await page
       .getByRole("button", { name: "Reload links", exact: true })
       .click();
