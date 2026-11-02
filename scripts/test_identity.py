@@ -5,6 +5,7 @@ import argparse
 import fnmatch
 import json
 import os
+import socket
 import subprocess
 import tempfile
 import time
@@ -37,6 +38,11 @@ parser.add_argument(
 args = parser.parse_args()
 if args.oidc_empty_salt and (not args.oidc_settings or args.browser):
     parser.error("--oidc-empty-salt requires --oidc-settings without --browser")
+if args.browser and args.oidc_linking and args.browser_proxy_port == 0:
+    # File-owned OIDC needs its callback URL before proxy startup.
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        args.browser_proxy_port = listener.getsockname()[1]
 root = Path(__file__).resolve().parents[1]
 prefix = "litellm-ne-identity-" + uuid.uuid4().hex[:8]
 containers = []
@@ -156,6 +162,8 @@ general_settings:
     default_role: internal_user_viewer
 """)
     value = config.read_text().replace("api://litellm-api/access", args.api_scope_name)
+    if args.browser and args.oidc_linking:
+        value = value.replace("redirect_uri: http://proxy:4000/oidc/callback", f"redirect_uri: http://proxy:{args.browser_proxy_port}/oidc/callback")
     if args.browser:
         value = value.replace("    mcp_access_rules:\n", "    mcp_access_rules:\n      delegate: {claim: roles, any_of: [mcp-delegate]}\n")
     value = value.replace(
@@ -226,9 +234,11 @@ general_settings:
             "--skip-generate",
         )
         mount = ["--mount", f"type=bind,src={root},dst=/work,readonly", "--mount", f"type=bind,src={restart_dir},dst=/restart"]
-        if not args.browser and args.test_pattern == "test_oidc_linking.py":
+        if not args.browser and fnmatch.fnmatch("test_oidc_linking.py", args.test_pattern):
             docker("run", "--rm", "--network", prefix, *mount, "-e", "DATABASE_URL=" + database,
                    "--entrypoint", "python", args.image, "/work/tests/identity/fixtures/seed_oidc_linking.py")
+            run("linking-gate", *mount, "-e", "DATABASE_URL=" + database, "--entrypoint", "python", args.image,
+                "/work/tests/identity/fixtures/oidc_linking_gate.py")
         run(
             "mcp-upstream",
             *(["-p", "127.0.0.1:8090:8090"] if args.browser else []),
@@ -409,7 +419,7 @@ general_settings:
             else:
                 raise RuntimeError("proxy did not restart")
             restart_tests = []
-            if args.test_pattern == "test_oidc_linking.py":
+            if fnmatch.fnmatch("test_oidc_linking.py", args.test_pattern):
                 restart_tests.append("test_oidc_linking.LinkingTests.test_z_associations_and_pending_decisions_survive_restart")
             if args.oidc_settings:
                 restart_tests.append("test_oidc_settings.OIDCSettingsTests.test_z_saved_configuration_and_browser_session_survive_cold_restart")
