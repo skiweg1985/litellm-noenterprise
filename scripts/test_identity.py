@@ -38,7 +38,7 @@ parser.add_argument(
 args = parser.parse_args()
 if args.oidc_empty_salt and (not args.oidc_settings or args.browser):
     parser.error("--oidc-empty-salt requires --oidc-settings without --browser")
-if args.browser and args.oidc_linking and args.browser_proxy_port == 0:
+if args.browser and args.browser_proxy_port == 0:
     # File-owned OIDC needs its callback URL before proxy startup.
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -162,7 +162,7 @@ general_settings:
     default_role: internal_user_viewer
 """)
     value = config.read_text().replace("api://litellm-api/access", args.api_scope_name)
-    if args.browser and args.oidc_linking:
+    if args.browser:
         value = value.replace("redirect_uri: http://proxy:4000/oidc/callback", f"redirect_uri: http://proxy:{args.browser_proxy_port}/oidc/callback")
     if args.browser:
         value = value.replace("    mcp_access_rules:\n", "    mcp_access_rules:\n      delegate: {claim: roles, any_of: [mcp-delegate]}\n")
