@@ -20,6 +20,8 @@ const dashboardDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(dashboardDir, "..", "..");
 // A scoped model export avoids changing unrelated upstream API bindings when
 // only the personal connection contract is consumed by this distribution.
+const oidcLinks = process.argv.includes("--oidc-links");
+const oidcSettings = process.argv.includes("--oidc-settings");
 const personalMcp = process.argv.includes("--personal-mcp");
 const subscriptions = process.argv.includes("--subscriptions");
 const subscriptionBulk = process.argv.includes("--subscription-bulk");
@@ -31,6 +33,8 @@ if (subscriptions) outputFile = "subscriptions-schema.d.ts";
 if (subscriptionLogs) outputFile = "subscription-logs-schema.d.ts";
 if (subscriptionBulk) outputFile = "subscription-bulk-schema.d.ts";
 if (subscriptionUsage) outputFile = "subscription-usage-schema.d.ts";
+if (oidcLinks) outputFile = "oidc-links-schema.d.ts";
+if (oidcSettings) outputFile = "oidc-settings-schema.d.ts";
 const outPath = join(dashboardDir, "src", "lib", "http", outputFile);
 const specDir = mkdtempSync(join(tmpdir(), "litellm-openapi-"));
 const specPath = join(specDir, "openapi.json");
@@ -45,7 +49,27 @@ const python = (process.env.LITELLM_PYTHON ?? "python3").split(" ");
 // across CI and contributors. inspect.cleandoc normalizes every description to one
 // canonical form regardless of interpreter, so the generated file is stable.
 let dumpSpec;
-if (subscriptionUsage || subscriptionBulk) {
+if (oidcLinks || oidcSettings) {
+  dumpSpec = [
+    "import inspect, json, sys",
+    oidcLinks
+      ? "from litellm.proxy.auth import oidc_links as models"
+      : "from litellm.proxy.auth import oidc_settings as models",
+    "schemas = {}",
+    oidcLinks
+      ? "for name in ('LinksResponse', 'LinkView', 'UserChoice', 'ApproveRequest', 'RevisionRequest'):"
+      : "for name in ('BrowserSettings', 'SettingsResponse', 'SaveSettingsRequest', 'SaveSettingsResponse', 'CheckProviderRequest', 'CheckProviderResponse', 'DisableSettingsRequest', 'SettingsError'):",
+    "    schema = getattr(models, name).model_json_schema(ref_template='#/components/schemas/{model}')",
+    "    schemas.update(schema.pop('$defs', {}))",
+    "    schemas[name] = schema",
+    "def normalize(node):",
+    "    if isinstance(node, dict): return {k: inspect.cleandoc(v) if k == 'description' and isinstance(v, str) else normalize(v) for k, v in node.items()}",
+    "    if isinstance(node, list): return [normalize(v) for v in node]",
+    "    return node",
+    "spec = {'openapi': '3.1.0', 'info': {'title': 'Independent OIDC', 'version': '1'}, 'paths': {}, 'components': {'schemas': schemas}}",
+    "with open(sys.argv[1], 'w') as f: json.dump(normalize(spec), f, sort_keys=True)",
+  ].join("\n");
+} else if (subscriptionUsage || subscriptionBulk) {
   dumpSpec = [
     "import json, os, sys, tempfile",
     "from fastapi import FastAPI",
@@ -145,7 +169,7 @@ try {
     stdio: "inherit",
   });
 
-  execFileSync(join(dashboardDir, "node_modules", ".bin", "openapi-typescript"), [specPath, "-o", outPath], {
+  execFileSync(join(dashboardDir, "node_modules", ".bin", "openapi-typescript"), [specPath, "-o", outPath, ...(oidcSettings ? ["--default-non-nullable", "false"] : [])], {
     cwd: dashboardDir,
     stdio: "inherit",
   });

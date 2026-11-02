@@ -32,6 +32,7 @@ import { toast } from "@/lib/toast";
 import { modelAvailableCall, userDeleteCall } from "@/components/networking";
 import { DefaultUserSettingsForm } from "./default-user-settings/DefaultUserSettingsForm";
 import { UsersTable } from "./view_users/UsersTable";
+import { OIDCAccountLinks } from "./oidc/OIDCAccountLinks";
 import UserInfoView from "./view_users/user_info_view";
 import { UserInfo } from "@/components/networking";
 
@@ -318,7 +319,7 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
   return (
     <div className="w-full overflow-hidden p-8">
       <div className="mb-4 flex items-center justify-between">
-        <div className="flex space-x-3">
+        <div className="flex flex-wrap gap-3">
           {userListQuery.isLoading && (
             <>
               <Skeleton className="h-9 w-28" />
@@ -364,17 +365,24 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
 
       {isProxyAdmin ? (
         <Tabs defaultValue="users" className="gap-0">
-          <TabsList variant="line" className="mb-4">
-            <TabsTrigger value="users" className="flex-none data-active:text-primary after:bg-primary">
+          <TabsList variant="line" className="mb-4 flex-wrap group-data-horizontal/tabs:h-auto">
+            <TabsTrigger value="users" className="h-auto flex-none data-active:text-primary after:bg-primary">
               Users
             </TabsTrigger>
-            <TabsTrigger value="default-settings" className="flex-none data-active:text-primary after:bg-primary">
+            <TabsTrigger value="default-settings" className="h-auto flex-none data-active:text-primary after:bg-primary">
               Default User Settings
+            </TabsTrigger>
+            <TabsTrigger value="oidc-links" className="h-auto flex-none data-active:text-primary after:bg-primary">
+              OIDC Account Links
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="users" keepMounted>
             {usersTable}
+          </TabsContent>
+
+          <TabsContent value="oidc-links">
+            {accessToken && <OIDCAccountLinks accessToken={accessToken} />}
           </TabsContent>
 
           <TabsContent value="default-settings" keepMounted>

@@ -554,6 +554,8 @@ async def new_user(
      }'
     ```
     """
+    from litellm.proxy.auth.oidc_links import guard_native_user_write
+    await guard_native_user_write(data.model_dump(exclude_unset=True), creating=True)
     try:
         from litellm.proxy.proxy_server import _license_check, prisma_client
 
@@ -1485,6 +1487,8 @@ async def _update_single_user_helper(
 
     Returns the updated user data or raises an exception on failure.
     """
+    from litellm.proxy.auth.oidc_links import guard_native_user_write
+    await guard_native_user_write(user_request.model_dump(exclude_unset=True))
     from litellm.proxy.proxy_server import general_settings, litellm_proxy_admin_name, prisma_client, user_api_key_cache
 
     if prisma_client is None:
