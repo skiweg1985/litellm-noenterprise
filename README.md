@@ -9,8 +9,13 @@ is **LiteLLM 1.106.6**.
 The reviewed upstream snapshot and independent build tooling are implemented.
 The dashboard is rebuilt from source. [Generic OIDC identity](docs/identity.md)
 now supports browser sessions and provider-token API access with claim-based
-admission, stable accounts, and ordered role mapping. Discovery metadata and
-API-token scopes share one configuration. Personal MCP connections reuse the
+admission, stable accounts, and ordered role mapping. User administration supports
+[reviewed links to existing accounts](docs/identity.md#link-an-existing-account)
+without changing their IDs or history. Configure OIDC in
+**Admin Settings → SSO Settings**, or use deployment files. An optional
+Microsoft Entra ID preset fills
+browser sign-in defaults without changing access rules or API settings.
+Discovery metadata and API-token scopes share one configuration. Personal MCP connections reuse the
 existing managed OAuth and client-supplied modes with per-server claim rules,
 protected persistent credentials, refresh and disconnect. The existing
 `/ui/connect/` page supports personal connection management without administration
