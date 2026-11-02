@@ -9,10 +9,20 @@ test("native SSO form activates complete OIDC policy and preserves it across con
   browser,
 }, testInfo) => {
   await openSettings(page);
+  await choose(page, "Provider preset", "Microsoft Entra ID");
+  await page.getByLabel("Directory (tenant) ID", { exact: true }).fill("12345678-1234-1234-1234-123456789abc");
+  await page.getByRole("button", { name: "Apply Entra defaults", exact: true }).click();
+  await expect(page.getByLabel("Issuer URL", { exact: true })).toHaveValue(
+    "https://login.microsoftonline.com/12345678-1234-1234-1234-123456789abc/v2.0",
+  );
+  await page.screenshot({ path: testInfo.outputPath("entra-preset.png") });
+  await choose(page, "Provider preset", "Generic OpenID Connect");
   await page
     .getByLabel("Issuer URL", { exact: true })
     .fill("http://issuer:8080");
   await page.getByText("Provider advanced options", { exact: true }).click();
+  await expect(page.getByLabel("User ID attribute", { exact: true })).toHaveValue("oid");
+  await page.getByLabel("User ID attribute", { exact: true }).fill("sub");
   await page
     .getByLabel("Allow HTTP for local testing only", { exact: true })
     .check();

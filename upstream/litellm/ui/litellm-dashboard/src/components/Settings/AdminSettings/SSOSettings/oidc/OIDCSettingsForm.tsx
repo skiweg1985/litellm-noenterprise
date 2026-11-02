@@ -12,6 +12,7 @@ import { browserDefaults, apiDefaults } from "./defaults";
 import { Advanced, Field, ListField, RuleEditor, Section, cleanList, cleanRule } from "./Fields";
 import { APISection, MCPSection, RolesSection } from "./PolicySections";
 import { Confirmation, ErrorFeedback, settingsError } from "./Feedback";
+import { ProviderPreset } from "./ProviderPreset";
 
 export function OIDCSettingsForm({
   settings,
@@ -146,6 +147,18 @@ export function OIDCSettingsForm({
       <form onSubmit={save} className="space-y-5">
         <fieldset disabled={settings.read_only || pending || checking} className="min-w-0 space-y-5">
           <Section title="Sign-in provider">
+            <ProviderPreset
+              issuer={browser.issuer}
+              onApply={(issuer) => {
+                setBrowser((current) => ({
+                  ...current,
+                  issuer,
+                  subject_claim: "oid",
+                  scopes: ["openid", "profile", "email"],
+                }));
+                setProvider(null);
+              }}
+            />
             <div className="grid gap-4 md:grid-cols-2">
               <Field
                 label="Issuer URL"

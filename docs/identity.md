@@ -13,6 +13,15 @@ displayed callback URL with your provider. The
 **Check provider** action checks discovery compatibility; it does not test the
 credential or complete a user sign-in.
 
+For Microsoft Entra ID in the public cloud, choose **Microsoft Entra ID** under
+**Provider preset**, enter the directory (tenant) GUID, and click **Apply Entra
+defaults**. This fills the tenant-specific issuer, `oid` user ID attribute and
+`openid`, `profile`, `email` sign-in scopes in the draft. It leaves credentials,
+callback, admission rules, roles and API access unchanged. Switching presets
+alone changes nothing. Review the draft, register the copied callback URL as a
+Web redirect in Entra, and save normally. Other clouds use the generic fields.
+Changing the issuer or user ID attribute can change account matching.
+
 Use the admission rule to choose who may create an account and sign in later.
 Add role mappings in priority order: the first matching rule wins. Choose a
 minimal default role for admitted users without a matching mapping. Optional

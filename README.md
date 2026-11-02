@@ -12,8 +12,10 @@ now supports browser sessions and provider-token API access with claim-based
 admission, stable accounts, and ordered role mapping. User administration supports
 [reviewed links to existing accounts](docs/identity.md#link-an-existing-account)
 without changing their IDs or history. Configure OIDC in
-**Admin Settings → SSO Settings**, or use deployment files. Discovery metadata and
-API-token scopes share one configuration. Personal MCP connections reuse the
+**Admin Settings → SSO Settings**, or use deployment files. An optional
+Microsoft Entra ID preset fills
+browser sign-in defaults without changing access rules or API settings.
+Discovery metadata and API-token scopes share one configuration. Personal MCP connections reuse the
 existing managed OAuth and client-supplied modes with per-server claim rules,
 protected persistent credentials, refresh and disconnect. The existing
 `/ui/connect/` page supports personal connection management without administration

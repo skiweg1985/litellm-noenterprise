@@ -112,6 +112,7 @@ it("shows file-owned settings without enabling any mutation controls", async () 
         source: "file",
         read_only: true,
         read_only_reason: "OIDC is owned by the deployment configuration.",
+        browser: { issuer: "https://login.microsoftonline.com/11111111-2222-3333-4444-aaaaaaaaaaaa/v2.0" },
         client_secret: { configured: true, source: "environment", environment_variable: "OIDC_SECRET_REFERENCE" },
       }),
     ),
@@ -124,7 +125,87 @@ it("shows file-owned settings without enabling any mutation controls", async () 
   await screen.findByText("OIDC is owned by the deployment configuration.");
   expect(screen.getByRole("button", { name: "Save changes", exact: true })).toBeDisabled();
   expect(screen.getByLabelText("Issuer URL", { exact: true })).toBeDisabled();
+  expect(screen.getByLabelText("Directory (tenant) ID")).toHaveValue("11111111-2222-3333-4444-aaaaaaaaaaaa");
+  expect(screen.getByRole("button", { name: "Apply Entra defaults" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Replace client secret", exact: true })).toBeDisabled();
   expect(screen.queryByLabelText("Client secret", { exact: true })).not.toBeInTheDocument();
   expect(screen.getByText(/OIDC_SECRET_REFERENCE/)).toBeInTheDocument();
+});
+
+it("applies Entra defaults explicitly while retaining saved credentials, roles and API access", async () => {
+  const user = userEvent.setup();
+  const existingFetch = globalThis.fetch;
+  const browser = {
+    issuer: "https://existing.example.test",
+    client_id: "keep-client",
+    redirect_uri: "https://gateway.example.test/oidc/callback",
+    subject_claim: "custom_subject",
+    scopes: ["openid", "custom"],
+    access_rule: { claim: "groups", any_of: ["allowed"] },
+    role_mappings: [{ rule: { claim: "groups", any_of: ["admins"] }, role: "proxy_admin" }],
+    default_role: "internal_user_viewer",
+  };
+  const api = {
+    resource: "https://gateway.example.test",
+    audience: "keep-audience",
+    scope_claim: "scp",
+    scope_format: "space_delimited",
+    token_types: ["JWT"],
+    scopes: [{ name: "api://kept/access", token_value: "access" }],
+    required_claims: [],
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET")
+        return json({
+          ...initial,
+          revision: 7,
+          source: "database",
+          enabled: true,
+          browser,
+          api,
+          client_secret: { configured: true, source: "database", environment_variable: null },
+        });
+      return existingFetch(url, init);
+    }),
+  );
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <SSOSettings />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("heading", { name: "OpenID Connect", exact: true });
+  await user.click(screen.getByRole("combobox", { name: "Provider preset" }));
+  await user.click(await screen.findByRole("option", { name: "Microsoft Entra ID" }));
+  const issuer = screen.getByLabelText("Issuer URL", { exact: true });
+  expect(issuer).toHaveValue(browser.issuer);
+  fireEvent.change(screen.getByLabelText("Directory (tenant) ID"), { target: { value: "common" } });
+  expect(screen.getByRole("button", { name: "Apply Entra defaults" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Directory (tenant) ID"), {
+    target: { value: " 11111111-2222-3333-4444-AAAAAAAAAAAA " },
+  });
+  expect(issuer).toHaveValue(browser.issuer);
+  await user.click(screen.getByRole("button", { name: "Apply Entra defaults" }));
+  const entraIssuer = "https://login.microsoftonline.com/11111111-2222-3333-4444-aaaaaaaaaaaa/v2.0";
+  expect(issuer).toHaveValue(entraIssuer);
+  await user.click(screen.getByText("Provider advanced options", { exact: true }));
+  expect(screen.getByLabelText("User ID attribute", { exact: true })).toHaveValue("oid");
+  expect(screen.getByLabelText("Requested sign-in scopes", { exact: true })).toHaveValue("openid\nprofile\nemail");
+  const copy = vi.spyOn(navigator.clipboard, "writeText");
+  await user.click(screen.getByRole("button", { name: "Copy callback URL" }));
+  expect(copy).toHaveBeenCalledWith(browser.redirect_uri);
+  await user.click(screen.getByRole("combobox", { name: "Provider preset" }));
+  await user.click(await screen.findByRole("option", { name: "Generic OpenID Connect" }));
+  expect(issuer).toHaveValue(entraIssuer);
+  expect(requests.some((r) => r.method === "PUT")).toBe(false);
+  await user.click(screen.getByRole("button", { name: "Save changes", exact: true }));
+  await waitFor(() => expect(requests.some((r) => r.method === "PUT")).toBe(true));
+  const saved = requests.find((r) => r.method === "PUT")!.body;
+  expect(saved).toMatchObject({
+    expected_revision: 7,
+    browser: { ...browser, issuer: entraIssuer, subject_claim: "oid", scopes: ["openid", "profile", "email"] },
+    api,
+  });
+  expect(saved).not.toHaveProperty("client_secret");
 });
