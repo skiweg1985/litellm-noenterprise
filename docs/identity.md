@@ -109,7 +109,7 @@ always retained.
 
 ## Link an existing account
 
-Use the OIDC linking controls in user administration when an existing native or
+Open **Users → OIDC Account Links** when an existing native or
 legacy SSO user needs independent OIDC access. The user first signs in through
 the configured provider. An eligible identity with a matching account candidate
 receives a generic administrator-review message and no LiteLLM session.
@@ -119,6 +119,9 @@ then select the intended existing user. Compare the current account role with
 the proposed OIDC role before approving. Email matching is a suggestion, not
 proof of account ownership. Multiple candidates require an explicit choice;
 an occupied legacy SSO association cannot be overwritten by approval.
+Older accounts used only with provider API tokens lack signed identity provenance
+and require one administrator review of the unchanged association. A matching
+SSO field alone does not establish a trusted link.
 
 Approval links the identity without signing the user in. Ask the user to sign in
 again: fresh provider claims must still satisfy admission, and the configured
