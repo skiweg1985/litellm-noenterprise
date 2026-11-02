@@ -56,4 +56,4 @@ Next: validate the configured Entra tenant and intended MCP clients with authori
 
 Azure Realtime Translate is not implemented. The
 [integration assessment](docs/realtime-translate-assessment.md) describes the
-existing deployment patch, required adaptation and estimated effort.
+proposed API, integration points and estimated effort.
