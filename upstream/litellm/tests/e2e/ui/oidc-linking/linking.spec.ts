@@ -113,7 +113,11 @@ test("administrator reviews, links and unlinks a verified identity without repla
     await dialog
       .getByRole("button", { name: "Confirm link", exact: true })
       .click();
-    await expect(page.getByRole("alert")).toContainText("changed elsewhere");
+    await expect(
+      page
+        .getByRole("region", { name: "OIDC account links", exact: true })
+        .getByRole("alert"),
+    ).toContainText("changed elsewhere");
     await page
       .getByRole("button", { name: "Reload links", exact: true })
       .click();
