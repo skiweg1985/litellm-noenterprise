@@ -272,9 +272,10 @@ async def invalidate_user_auth(user_id: str) -> None:
 
 async def synchronize_account(config: OIDCSettings, claims: dict[str, Any]):
     """Apply the same admission policy for new and existing users, without email linking."""
-    user_id = user_id_for_claims(config, claims)
+    from litellm.proxy.auth.oidc_links import resolve_account, associated_user
     repository = user_repository()
-    previous = await repository.find_by_id(user_id)
+    previous = await associated_user(config, claims)
+    user_id = previous.user_id if previous else user_id_for_claims(config, claims)
     metadata = dict(previous.metadata or {}) if previous else {}
     old = verified_identity_state(config, user_id, metadata)
     if not config.access_rule.matches(claims):
@@ -286,6 +287,10 @@ async def synchronize_account(config: OIDCSettings, claims: dict[str, Any]):
             await repository.update(user_id, {"metadata": json.dumps(metadata)}, id_field="user_id")
         await invalidate_user_auth(user_id)
         raise HTTPException(403, "Identity does not satisfy the access rule")
+    previous = await resolve_account(config, claims)
+    user_id = previous.user_id
+    metadata = dict(previous.metadata or {})
+    old = verified_identity_state(config, user_id, metadata)
     role = config.role_for(claims)
     policy_claims = config.retained_policy_claims(claims)
     digest = hashlib.sha256(json.dumps([role, policy_claims, config.fingerprint], sort_keys=True).encode()).hexdigest()
@@ -310,10 +315,8 @@ async def synchronize_account(config: OIDCSettings, claims: dict[str, Any]):
     email = claims.get("email")
     if isinstance(email, str):
         values["user_email"] = email
-    await repository.table.upsert(
-        where={"user_id": user_id},
-        data={"create": {"user_id": user_id, "sso_user_id": user_id, "models": [], **values}, "update": values},
-    )
+    from litellm.proxy.auth.oidc_links import update_browser_account
+    await update_browser_account(config, claims, user_id, values)
     await invalidate_user_auth(user_id)
     return await repository.find_by_id(user_id)
 
@@ -452,7 +455,16 @@ async def complete_login(request: Request):
             claims = await verify_id_token(config, client, metadata, token.json()["id_token"], flow["nonce"])
     except (httpx.HTTPError, ValueError, KeyError):
         raise HTTPException(401, "OIDC token exchange failed") from None
-    user = await synchronize_account(config, claims)
+    try:
+        user = await synchronize_account(config, claims)
+    except HTTPException as exc:
+        if isinstance(exc.detail, dict) and exc.detail.get("code") == "linking_required":
+            from fastapi.responses import HTMLResponse
+            response = HTMLResponse('<!doctype html><html lang="en"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Account linking</title><main><h1>Account linking requires administrator review.</h1><p>Try signing in again after an administrator has reviewed your request.</p></main></html>', status_code=403, headers={"Cache-Control": "no-store"})
+            for cookie in (SESSION_COOKIE, FLOW_COOKIE, "token"):
+                response.delete_cookie(cookie, path="/")
+            return response
+        raise
     state = user.metadata[METADATA_KEY]
     role = user.user_role
     response = RedirectResponse(
@@ -521,6 +533,9 @@ async def current_session(request: Request):
     if record.expires is None or record.expires.replace(tzinfo=record.expires.tzinfo or UTC) <= datetime.now(UTC):
         raise HTTPException(401, "OIDC browser session has expired")
     user = await user_repository().find_by_id(session.get("user_id", ""))
+    from litellm.proxy.auth.oidc_links import association_active
+    if not await association_active(config, user):
+        raise HTTPException(401, "OIDC account association is no longer active")
     state = verified_identity_state(config, user.user_id, user.metadata or {}) if user else {}
     if (
         not state.get("active")

@@ -18697,7 +18697,7 @@ async def update_config(
         )
         from litellm.proxy.auth.oidc_settings import SETTINGS_KEY
         oidc_general = request_body.get("general_settings")
-        if SETTINGS_KEY in request_body or (isinstance(oidc_general, dict) and any(key in oidc_general for key in ("oidc_identity", "oidc_api", SETTINGS_KEY))):
+        if any(str(key).startswith("independent_oidc_link:") for key in request_body) or SETTINGS_KEY in request_body or (isinstance(oidc_general, dict) and any(key in oidc_general for key in ("oidc_identity", "oidc_api", SETTINGS_KEY))):
             raise HTTPException(status_code=400, detail="Use the independent OIDC settings API for OIDC changes")
         raw_router_settings: Final = request_body.get("router_settings")
         if isinstance(raw_router_settings, dict):
@@ -20702,6 +20702,8 @@ from litellm.proxy.auth.oidc_identity import router as oidc_identity_router
 app.include_router(oidc_identity_router)
 from litellm.proxy.auth.oidc_settings import OIDCSettingsMiddleware, router as oidc_settings_router
 app.include_router(oidc_settings_router)
+from litellm.proxy.auth.oidc_links import router as oidc_links_router
+app.include_router(oidc_links_router)
 app.add_middleware(OIDCSettingsMiddleware)
 app.include_router(organization_router)
 app.include_router(customer_router)

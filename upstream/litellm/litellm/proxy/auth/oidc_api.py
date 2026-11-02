@@ -174,25 +174,11 @@ async def authenticate_provider(request: Request, api_key: str | None) -> UserAP
             rule.matches(claims) for rule in config.required_claims
         ):
             raise HTTPException(403, "Identity does not satisfy the API access rules")
-        user_id = identity.user_id_for_claims(browser, claims)
         role = browser.role_for(claims)
         authorize_api_route(request, role)
-        # API tokens have their own grant context. Never replace the browser's
-        # signed snapshot or persistent role with a possibly narrower API grant.
-        repository = identity.user_repository()
-        await repository.table.upsert(
-            where={"user_id": user_id},
-            data={
-                "create": {
-                    "user_id": user_id,
-                    "sso_user_id": user_id,
-                    "user_role": browser.default_role,
-                    "models": [],
-                },
-                "update": {},
-            },
-        )
-        user = await repository.find_by_id(user_id)
+        from litellm.proxy.auth.oidc_links import resolve_account
+        user = await resolve_account(browser, claims)
+        user_id = user.user_id
         request.state.oidc_claims = browser.retained_policy_claims(claims)
         request.state.oidc_user_id = user_id
         request.state.oidc_api = True
