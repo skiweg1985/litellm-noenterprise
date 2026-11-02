@@ -742,7 +742,7 @@ class OIDCSettingsMiddleware:
 
         response_send = (
             settings_send
-            if path == "/oidc/settings" or path.startswith("/oidc/settings/")
+            if path in ("/oidc/settings", "/oidc/links") or path.startswith(("/oidc/settings/", "/oidc/links/"))
             else send
         )
         token = current_snapshot.set(snapshot)

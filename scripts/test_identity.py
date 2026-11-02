@@ -14,6 +14,7 @@ from pathlib import Path
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("image", default="litellm-noenterprise:baseline", nargs="?")
 parser.add_argument("--browser", action="store_true", help="Run the personal UI browser journeys on loopback ports 4000, 8080, 8090")
+parser.add_argument("--oidc-linking", action="store_true", help="Run independent OIDC account-linking acceptance")
 parser.add_argument("--oidc-settings", action="store_true", help="Start without file-owned OIDC for settings acceptance")
 parser.add_argument("--oidc-empty-salt", action="store_true", help="Test rejected OIDC settings saves with an explicitly empty encryption key")
 parser.add_argument("--browser-proxy-port", type=int, default=4000, help="Loopback browser port; 0 chooses an available port")
@@ -66,6 +67,8 @@ def run(name, *parts):
 with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
     restart_dir = Path(tmp) / "restart"
     restart_dir.mkdir()
+    # Owned synthetic fixture directory: the image runs with a different UID on Linux.
+    restart_dir.chmod(0o777)
     config = Path(tmp) / "config.yaml"
     config.write_text("""model_list:
   - model_name: fixture-model
@@ -223,6 +226,9 @@ general_settings:
             "--skip-generate",
         )
         mount = ["--mount", f"type=bind,src={root},dst=/work,readonly", "--mount", f"type=bind,src={restart_dir},dst=/restart"]
+        if not args.browser and args.test_pattern == "test_oidc_linking.py":
+            docker("run", "--rm", "--network", prefix, *mount, "-e", "DATABASE_URL=" + database,
+                   "--entrypoint", "python", args.image, "/work/tests/identity/fixtures/seed_oidc_linking.py")
         run(
             "mcp-upstream",
             *(["-p", "127.0.0.1:8090:8090"] if args.browser else []),
@@ -249,9 +255,9 @@ general_settings:
             "/work/tests/identity/fixtures/issuer.py",
         )
         source_env = (["-e", "PYTHONPATH=/work/upstream/litellm"] if args.source_overlay else [])
-        if args.source_overlay and args.oidc_settings:
+        if args.source_overlay and (args.oidc_settings or args.oidc_linking):
             source_env = []
-            for relative in ("proxy/auth/oidc_settings.py", "proxy/auth/oidc_identity.py", "proxy/auth/oidc_api.py", "proxy/auth/user_api_key_auth.py", "proxy/discovery_endpoints/ui_discovery_endpoints.py", "proxy/proxy_server.py"):
+            for relative in ("proxy/auth/oidc_links.py", "proxy/management_endpoints/internal_user_endpoints.py", "proxy/auth/oidc_settings.py", "proxy/auth/oidc_identity.py", "proxy/auth/oidc_api.py", "proxy/auth/user_api_key_auth.py", "proxy/discovery_endpoints/ui_discovery_endpoints.py", "proxy/proxy_server.py"):
                 source_path = root / "upstream/litellm/litellm" / relative
                 if source_path.exists():
                     source_env.extend(["--mount", f"type=bind,src={source_path},dst=/opt/venv/lib/python3.12/site-packages/litellm/{relative},readonly"])
@@ -270,7 +276,7 @@ general_settings:
             "-e",
             "OIDC_TEST_CLIENT_SECRET=fixture-only",
             *(["-e", "LITELLM_SALT_KEY="] if args.oidc_empty_salt else []),
-            *(["-e", "UI_USERNAME=admin", "-e", "UI_PASSWORD=fixture-settings-admin-only"] if args.oidc_settings else []),
+            *(["-e", "UI_USERNAME=admin", "-e", "UI_PASSWORD=fixture-settings-admin-only"] if (args.oidc_settings or args.oidc_linking) else []),
             "-e", "CHATGPT_AUTH_BASE=http://chatgpt:8091",
             "-e", "CHATGPT_API_BASE=http://chatgpt:8091",
             "-e", "CHATGPT_MODELS_URL=http://chatgpt:8091/models",
@@ -339,7 +345,7 @@ general_settings:
             port = docker("inspect", prefix + "-proxy", "--format", '{{(index (index .NetworkSettings.Ports "4000/tcp") 0).HostPort}}').stdout.strip()
             ui = root / "upstream/litellm/tests/e2e/ui"
             subprocess.run(
-                [str(ui / "node_modules/.bin/playwright"), "test", "--config", "playwright.oidc-settings.config.ts" if args.oidc_settings else "playwright.personal.config.ts"],
+                [str(ui / "node_modules/.bin/playwright"), "test", "--config", "playwright.oidc-linking.config.ts" if args.oidc_linking else "playwright.oidc-settings.config.ts" if args.oidc_settings else "playwright.personal.config.ts"],
                 cwd=ui,
                 env={**os.environ, "UI_ADMIN_DISABLED": str(args.browser_admin_disabled).lower(), "UI_PROXY_URL": "http://proxy:" + port},
                 check=True,
@@ -386,7 +392,7 @@ general_settings:
         print(result.stderr)
         if result.returncode:
             raise RuntimeError("identity acceptance tests failed")
-        if not args.oidc_empty_salt and (args.oidc_settings or args.test_pattern in ("test*.py", "test_mcp.py", "test_subscription_models.py", "test_subscription_reserves.py", "test_subscription_distribution.py")):
+        if not args.oidc_empty_salt and (args.oidc_settings or args.test_pattern in ("test*.py", "test_mcp.py", "test_oidc_linking.py", "test_subscription_models.py", "test_subscription_reserves.py", "test_subscription_distribution.py")):
             docker("restart", prefix + "-proxy")
             for _ in range(90):
                 ready = docker(
@@ -403,6 +409,8 @@ general_settings:
             else:
                 raise RuntimeError("proxy did not restart")
             restart_tests = []
+            if args.test_pattern == "test_oidc_linking.py":
+                restart_tests.append("test_oidc_linking.LinkingTests.test_z_associations_and_pending_decisions_survive_restart")
             if args.oidc_settings:
                 restart_tests.append("test_oidc_settings.OIDCSettingsTests.test_z_saved_configuration_and_browser_session_survive_cold_restart")
             if args.test_pattern in ("test*.py", "test_mcp.py"):
@@ -419,6 +427,7 @@ general_settings:
                     "-e", "OIDC_SETTINGS_MODE=" + str(args.oidc_settings).lower(),
                     "-e", "OIDC_SETTINGS_RESTART_PHASE=read",
                     "-e", "EXPECTED_MASTER_KEY=" + args.master_key,
+                    "-e", "OIDC_LINKING_RESTART_PHASE=read",
                     "-e", "MCP_RESTART_PHASE=read",
                     "-e", "SUBSCRIPTION_RESTART_PHASE=read",
                     "--workdir", "/work/tests/identity",
