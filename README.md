@@ -53,3 +53,7 @@ Changes reach protected `main` through pull requests; branch conventions are in
 [AGENTS.md](AGENTS.md#git-workflow). Preserve vendor ancestry with merge commits.
 
 Next: validate the configured Entra tenant and intended MCP clients with authorized access. Controlled-service tests do not establish live interoperability.
+
+Azure Realtime Translate is not implemented. The
+[integration assessment](docs/realtime-translate-assessment.md) describes the
+existing deployment patch, required adaptation and estimated effort.
