@@ -40,7 +40,7 @@ test("managed connection survives sign-out, reconnects and disconnects without e
   const identity = {
     sub: actor,
     oid: actor,
-    email: "alice@example.test",
+    email: `${actor}@example.test`,
     roles: ["access", "mcp-a", "mcp-delegate", "mcp-setup"],
   };
   await request.post("http://127.0.0.1:8080/control/actor", { data: identity });
@@ -99,8 +99,10 @@ test("managed connection survives sign-out, reconnects and disconnects without e
     .post("http://127.0.0.1:8080/control/access-token", { data: identity })
     .then((r) => r.json());
   const headers = { Authorization: `Bearer ${token.access_token}` };
+  const proxyURL = new URL(testInfo.project.use.baseURL!);
+  proxyURL.hostname = "127.0.0.1";
   const call = () =>
-    request.post("http://127.0.0.1:4000/mcp-rest/tools/call", {
+    request.post(new URL("/mcp-rest/tools/call", proxyURL).href, {
       headers,
       data: { server_id: "managed_a", name: "whoami", arguments: {} },
     });
