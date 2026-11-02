@@ -66,6 +66,15 @@ test("administrator reviews, links and unlinks a verified identity without repla
     await expect(
       page.getByRole("tab", { name: "OIDC Account Links", exact: true }),
     ).toBeVisible();
+    const tabBounds = await page
+      .getByRole("tab", { name: "OIDC Account Links", exact: true })
+      .boundingBox();
+    const headingBounds = await page
+      .getByRole("heading", { name: "OIDC account links", exact: true })
+      .boundingBox();
+    expect(tabBounds).not.toBeNull();
+    expect(headingBounds).not.toBeNull();
+    expect(headingBounds!.y).toBeGreaterThan(tabBounds!.y + tabBounds!.height);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
