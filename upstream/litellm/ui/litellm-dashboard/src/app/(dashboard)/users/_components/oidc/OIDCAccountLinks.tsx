@@ -276,7 +276,7 @@ export function OIDCAccountLinks({ accessToken }: { accessToken: string }) {
       setNotice(successMessages[decision.action]);
       setDecision(null);
       await queryClient.invalidateQueries({ queryKey });
-      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await queryClient.invalidateQueries({ queryKey: ["userList"] });
     } catch (error) {
       setDecision(null);
       setActionError(errorMessage(error));
