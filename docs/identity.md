@@ -117,7 +117,9 @@ receives a generic administrator-review message and no LiteLLM session.
 As a full administrator, review the pending identity, issuer and stable subject,
 then select the intended existing user. Compare the current account role with
 the proposed OIDC role before approving. Email matching is a suggestion, not
-proof of account ownership. Multiple candidates require an explicit choice;
+proof of account ownership. Matching ignores surrounding whitespace and letter
+case, but does not rewrite aliases, plus addresses or dots. Multiple candidates
+require an explicit choice;
 an occupied legacy SSO association cannot be overwritten by approval.
 Older accounts used only with provider API tokens lack signed identity provenance
 and require one administrator review of the unchanged association. A matching
