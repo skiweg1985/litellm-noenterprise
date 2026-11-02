@@ -226,7 +226,7 @@ general_settings:
             "--skip-generate",
         )
         mount = ["--mount", f"type=bind,src={root},dst=/work,readonly", "--mount", f"type=bind,src={restart_dir},dst=/restart"]
-        if not args.browser and args.test_pattern == "test_oidc_linking.py":
+        if not args.browser and fnmatch.fnmatch("test_oidc_linking.py", args.test_pattern):
             docker("run", "--rm", "--network", prefix, *mount, "-e", "DATABASE_URL=" + database,
                    "--entrypoint", "python", args.image, "/work/tests/identity/fixtures/seed_oidc_linking.py")
         run(
@@ -409,7 +409,7 @@ general_settings:
             else:
                 raise RuntimeError("proxy did not restart")
             restart_tests = []
-            if args.test_pattern == "test_oidc_linking.py":
+            if fnmatch.fnmatch("test_oidc_linking.py", args.test_pattern):
                 restart_tests.append("test_oidc_linking.LinkingTests.test_z_associations_and_pending_decisions_survive_restart")
             if args.oidc_settings:
                 restart_tests.append("test_oidc_settings.OIDCSettingsTests.test_z_saved_configuration_and_browser_session_survive_cold_restart")
