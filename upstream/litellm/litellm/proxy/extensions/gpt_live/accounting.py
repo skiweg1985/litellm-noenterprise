@@ -79,8 +79,10 @@ class SessionAccounting:
     def received(self, event):
         kind = event.get("type")
         if kind == "session.started":
-            self.live_started = self.clock()
-            self.provider_session_id = (event.get("session") or {}).get("id")
+            # A WebRTC session starts with the SDP exchange, before the sideband.
+            if self.live_started is None:
+                self.live_started = self.clock()
+            self.provider_session_id = self.provider_session_id or (event.get("session") or {}).get("id")
         elif kind == "session.delegation.created":
             self.delegations += 1
         elif kind in ("session.output_audio.delta", "session.output_transcript.delta"):

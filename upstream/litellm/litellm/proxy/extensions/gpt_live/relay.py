@@ -124,6 +124,13 @@ async def relay(client, upstream, accounting, secrets=(), max_seconds=None):
 
 async def run_azure(websocket, *, model, api_base, auth_headers, logging_obj, context, connect=None):
     """Entry point from AzureOpenAIRealtime.async_realtime."""
+    if context.get("transport") == "webrtc":
+        from .webrtc import start
+
+        return await start(
+            model=model, api_base=api_base, auth_headers=auth_headers,
+            logging_obj=logging_obj, context=context,
+        )
     import websockets
 
     from litellm.llms.custom_httpx.http_handler import get_shared_realtime_ssl_context

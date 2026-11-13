@@ -307,8 +307,46 @@ deployment, the number of client delegations and why the session ended. Audio
 and transcripts are not logged. A session that Azure refuses is logged as a
 failure without cost.
 
-WebRTC sessions, GPT-Live through OpenAI's own API and Responses delegation are
-not supported.
+### Connect over WebRTC
+
+With WebRTC the audio flows directly between the device and Azure; the proxy
+handles the setup and the control channel. Send the session and the SDP offer
+to the same path:
+
+```http
+POST /v1/live/sessions
+Authorization: Bearer <virtual key>
+
+{"session": {"model": "gpt-live-1", "delegation": {"type": "client"}},
+ "transport": {"type": "webrtc", "sdp": "v=0..."}}
+```
+
+The proxy runs the same checks as for the WebSocket and forwards the offer to
+the deployment. An `OpenAI-Safety-Identifier` header is passed on. The answer
+is `201` with `{"session": {"id": "<id>"}, "transport": {"type": "webrtc", "sdp": "<answer>"}}`.
+Azure's own refusals, such as an offer without audio, keep their status and
+message.
+
+Right after the setup the proxy opens its own control connection to the
+session. It records usage, enforces `GPT_LIVE_MAX_SESSION_SECONDS` and bills
+the session even if the client never attaches. To receive transcripts and
+delegations, connect to `wss://<proxy>/v1/live/sessions/<id>/attach` with the
+same key. Events that arrived before the attach are replayed, up to 200. A
+different key gets 403; an unknown or ended session gets 404. Only one client
+can attach at a time. The attach accepts the same client events as the
+WebSocket, including `delegation_id: null`. Unsupported events are dropped and
+logged without an `error` event, because clients may end the conversation on
+any error.
+
+Billing starts with the setup. If Azure closes the control connection without
+`session.closed`, for example after the device hung up, the time since the
+setup is billed.
+
+WebRTC sessions live in the memory of the worker that created them. With more
+than one proxy worker, route the attach to the same worker or use a single
+worker.
+
+GPT-Live through OpenAI's own API and Responses delegation are not supported.
 
 ## Provider behavior
 

@@ -11,6 +11,8 @@ import json
 import os
 
 PATHS = ("/v1/live/sessions", "/live/sessions")
+# Control channel of a WebRTC session, see webrtc.py.
+ATTACH_PATHS = tuple(path + "/{session_id}/attach" for path in PATHS)
 
 # The route stores the start frame here; the Azure realtime handler
 # reads it. Only the server writes the ASGI scope, a client cannot set it.

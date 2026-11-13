@@ -444,6 +444,8 @@ class LiteLLMRoutes(enum.Enum):
         # GPT-Live
         "/v1/live/sessions",
         "/live/sessions",
+        "/v1/live/sessions/{session_id}/attach",
+        "/live/sessions/{session_id}/attach",
         # realtime (GA WebRTC HTTP routes)
         "/realtime/client_secrets",
         "/v1/realtime/client_secrets",

@@ -346,7 +346,9 @@ class IntegrationTests(unittest.TestCase):
     def test_proxy_registers_the_routes_once(self):
         from litellm.proxy.proxy_server import app
 
-        paths = [getattr(route, "path", None) for route in app.routes]
+        from starlette.routing import WebSocketRoute
+
+        paths = [route.path for route in app.routes if isinstance(route, WebSocketRoute)]
         for path in policy.PATHS:
             self.assertEqual(1, paths.count(path), path)
 
