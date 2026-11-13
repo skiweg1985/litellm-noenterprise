@@ -47,6 +47,11 @@ def max_session_seconds():
     return seconds
 
 
+def log_empty_sessions():
+    """LITELLM_TRANSLATE_LOG_EMPTY_SESSIONS=true also logs sessions without audio."""
+    return os.environ.get("LITELLM_TRANSLATE_LOG_EMPTY_SESSIONS", "").strip().lower() in ("1", "true", "yes")
+
+
 def requested_model(query):
     """The model alias from ?model=..., the only query parameter allowed."""
     items = list(query.multi_items())
