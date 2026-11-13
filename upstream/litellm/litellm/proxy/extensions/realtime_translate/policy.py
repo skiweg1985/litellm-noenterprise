@@ -109,6 +109,14 @@ def translation_url(api_base, model):
     )
 
 
+def model_info_of(logging_obj):
+    """model_info of the routed deployment, if the logging object carries it."""
+    details = getattr(logging_obj, "model_call_details", None)
+    params = details.get("litellm_params") if isinstance(details, dict) else None
+    info = params.get("model_info") if isinstance(params, dict) else None
+    return info if isinstance(info, dict) else None
+
+
 def reject_outside_route(model, model_info=None):
     """Translation models only through the translation route.
 

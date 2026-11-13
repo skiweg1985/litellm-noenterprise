@@ -159,8 +159,11 @@ class AzureOpenAIRealtime(AzureChatCompletion):
         import websockets
         from websockets.asyncio.client import ClientConnection
 
-        # GPT-Live sessions marked by litellm.proxy.extensions.gpt_live.routes.
-        _gpt_live = (getattr(websocket, "scope", None) or {}).get("litellm.gpt_live")
+        # GPT-Live and translation sessions are marked in the ASGI scope by
+        # litellm.proxy.extensions.gpt_live.routes and .realtime_translate.routes.
+        _scope = getattr(websocket, "scope", None)
+        _scope = _scope if isinstance(_scope, dict) else {}
+        _gpt_live = _scope.get("litellm.gpt_live")
         if _gpt_live is not None:
             from litellm.proxy.extensions.gpt_live.relay import run_azure
 
@@ -172,10 +175,9 @@ class AzureOpenAIRealtime(AzureChatCompletion):
                 logging_obj=logging_obj,
                 context=_gpt_live,
             )
-        # Translation sessions marked by litellm.proxy.extensions.realtime_translate.routes.
-        from litellm.proxy.extensions.realtime_translate.policy import reject_outside_route
+        from litellm.proxy.extensions.realtime_translate.policy import model_info_of, reject_outside_route
 
-        _translate = (getattr(websocket, "scope", None) or {}).get("litellm.realtime_translate")
+        _translate = _scope.get("litellm.realtime_translate")
         if _translate is not None:
             from litellm.proxy.extensions.realtime_translate.stream import run_azure as run_translation
 
@@ -187,7 +189,7 @@ class AzureOpenAIRealtime(AzureChatCompletion):
                 logging_obj=logging_obj,
                 context=_translate,
             )
-        reject_outside_route(model, (logging_obj.model_call_details.get("litellm_params") or {}).get("model_info"))
+        reject_outside_route(model, model_info_of(logging_obj))
         if api_base is None:
             raise ValueError("api_base is required for Azure OpenAI calls")
         backend_uses_beta_protocol: Final = realtime_protocol is None or realtime_protocol.upper() not in ("GA", "V1")
