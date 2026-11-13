@@ -419,6 +419,10 @@ general_settings:
                 logs = docker("logs", name, check=False)
                 print(logs.stdout[-10000:])
                 print(logs.stderr[-10000:])
+                if os.environ.get("CI_LOG_DIR"):
+                    target = Path(os.environ["CI_LOG_DIR"])
+                    target.mkdir(parents=True, exist_ok=True)
+                    (target / (name + ".log")).write_text(logs.stdout + logs.stderr)
         raise
     finally:
         for name in reversed(containers):

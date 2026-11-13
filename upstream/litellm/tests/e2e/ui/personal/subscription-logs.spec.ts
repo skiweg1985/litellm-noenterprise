@@ -21,6 +21,7 @@ test("subscription logs preserve dispatch attribution and support named filter d
   const api = async (path: string, method = "GET", body?: unknown) => page.evaluate(async ({ path, method, body }) => {
     const response = await fetch(path, {
       method,
+      signal: AbortSignal.timeout(20000),
       headers: { Authorization: "Bearer oidc-browser-session", "Content-Type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
