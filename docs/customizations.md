@@ -206,9 +206,10 @@ Introduced in #38. #40 skips spend logs for sessions without audio.
 
 ## Dashboard fixes
 
-- #41: tables that fill the page height (`components/shared/DataTable/DataTable.tsx`,
-  `fillHeight`) keep a minimum height of 24rem. On phones, banners and filters
-  previously collapsed the rows behind the sticky header.
+- #41: tables with `fillHeight` (`components/shared/DataTable/DataTable.tsx`)
+  fill the viewport only from the `md` breakpoint. On phones, the toolbar,
+  banners and pagination collapsed the rows behind the sticky header; there the
+  table now keeps its natural height and the page scrolls.
 
 ## Planned removals
 
