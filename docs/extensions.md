@@ -249,6 +249,67 @@ WebP, and SVG and retains the PNG fallback for providers without media metadata.
 Provider-reported cost is retained. Token usage is reported only when the provider
 supplies the counts; per-image cost is not converted into invented token usage.
 
+## Talk to GPT-Live on Azure
+
+GPT-Live is a full-duplex voice model. It keeps talking while background work
+runs and hands that work to the client. Clients connect to
+`wss://<proxy>/v1/live/sessions` with a virtual key or an OIDC API token and name
+a public model in the first event:
+
+```json
+{"type": "session.start", "session": {"model": "gpt-live-1", "instructions": "Answer briefly."}}
+```
+
+Add the model like any Azure model: `azure/<deployment>` with the resource's
+API base and credential. A named credential works too. The deployment must run
+`gpt-live-1`. If its name differs, set `base_model: azure/gpt-live-1` in the
+model info or set `input_cost_per_second`. Without a price the session is
+refused. Turn off the background health check for the model, because the
+Realtime health check calls a path that GPT-Live does not serve.
+
+The proxy checks the key's model access, budget, limits and pre-call hooks
+before it connects. The router picks the deployment and resolves its
+credentials, which never reach the client. Azure receives the start event with
+the deployment name as model. Then the proxy forwards Azure events unchanged and
+accepts these client events: `session.input_audio.append`,
+`session.input_audio.mute`, `session.input_audio.unmute`,
+`session.instructions.append`, `session.thinking.append`,
+`session.commentary.append` and `session.close`. Any other event is answered
+with an `error` event and dropped; the session continues. Binary or malformed
+frames, duplicate fields and frames over 256 KiB end the session.
+
+Only client delegation is accepted. With Responses delegation Azure would call
+the background model itself, outside the proxy's keys and logs. In client
+delegation the client receives `session.delegation.created`, runs the task as an
+ordinary request through the proxy, for example `/v1/responses` with any model
+and its tools, and returns the result:
+
+```json
+{"type": "session.commentary.append", "delegation_id": "<delegation.id>", "content": "It is about 8 pm in Tokyo."}
+```
+
+`session.thinking.append` with the same ID adds quiet progress context. The
+delegation event carries no text. The task follows from the transcript events
+since the previous delegation.
+
+Sessions end after `GPT_LIVE_MAX_SESSION_SECONDS`, 1800 by default. When the
+client disconnects or the limit is reached, the proxy sends `session.close` so
+Azure reports the final usage. Budgets are checked when a session starts, not
+during it.
+
+Each session produces one log entry with call type `_arealtime`. Its cost is the
+session seconds Azure reports in `session.closed`, multiplied by the model's
+price per second. Silence counts, because Azure bills the session duration. If
+the connection breaks before `session.closed`, the time since `session.started`
+is billed when it exceeds the last reported value.
+`metadata.spend_logs_metadata.gpt_live` records the seconds, their source, the
+deployment, the number of client delegations and why the session ended. Audio
+and transcripts are not logged. A session that Azure refuses is logged as a
+failure without cost.
+
+WebRTC sessions, GPT-Live through OpenAI's own API and Responses delegation are
+not supported.
+
 ## Provider behavior
 
 - ChatGPT accepts the standard client request shape and handles an upstream SSE

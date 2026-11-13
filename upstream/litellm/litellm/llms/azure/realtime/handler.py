@@ -159,6 +159,19 @@ class AzureOpenAIRealtime(AzureChatCompletion):
         import websockets
         from websockets.asyncio.client import ClientConnection
 
+        # GPT-Live sessions marked by litellm.proxy.extensions.gpt_live.routes.
+        _gpt_live = (getattr(websocket, "scope", None) or {}).get("litellm.gpt_live")
+        if _gpt_live is not None:
+            from litellm.proxy.extensions.gpt_live.relay import run_azure
+
+            return await run_azure(
+                websocket,
+                model=model,
+                api_base=api_base,
+                auth_headers=self.get_auth_headers(api_key=api_key, azure_ad_token=azure_ad_token),
+                logging_obj=logging_obj,
+                context=_gpt_live,
+            )
         if api_base is None:
             raise ValueError("api_base is required for Azure OpenAI calls")
         backend_uses_beta_protocol: Final = realtime_protocol is None or realtime_protocol.upper() not in ("GA", "V1")
