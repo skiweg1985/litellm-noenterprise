@@ -29,7 +29,7 @@ git diff --name-status origin/vendor/litellm origin/main -- upstream/litellm \
   | grep -vE '\.test\.|/tests?/|test_'
 ```
 
-On 2026-11-13 this showed 78 modified and 83 added upstream files, without
+On 2026-11-13 this showed 79 modified and 74 added upstream files, without
 test files.
 
 ## Overview
