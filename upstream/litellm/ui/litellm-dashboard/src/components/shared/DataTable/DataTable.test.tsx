@@ -899,6 +899,15 @@ describe("DataTable layout", () => {
     expect(screen.getByTestId("data-table-head")).toHaveClass("sticky", "bg-background");
   });
 
+  it("keeps a minimum height when fillHeight shares the viewport with other content", () => {
+    render(<DataTable data={CHARLIE_ALICE_BOB} columns={nameEmailColumns} fillHeight />);
+
+    const root = screen.getByTestId("data-table-root");
+    expect(root).toHaveClass("min-h-96", "flex-1");
+    expect(root).not.toHaveClass("min-h-0");
+    expect(screen.getByTestId("data-table-scroller")).toHaveClass("min-h-0", "flex-1");
+  });
+
   it("leaves the default layout untouched when neither height mode is set", () => {
     render(<DataTable data={CHARLIE_ALICE_BOB} columns={nameEmailColumns} />);
     const scroller = screen.getByTestId("data-table-scroller");

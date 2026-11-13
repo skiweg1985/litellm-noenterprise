@@ -58,8 +58,10 @@ const INTERACTIVE_SELECTOR = "button, a, input, select, textarea, [role=checkbox
 
 const noop = () => {};
 
+// A filled table keeps a usable minimum height. When banners and filters take the
+// viewport (phones), the page scrolls instead of collapsing the rows to zero height.
 const dataTableRoot = cva("w-full", {
-  variants: { fill: { true: "flex h-full min-h-0 flex-1 flex-col", false: null } },
+  variants: { fill: { true: "flex h-full min-h-96 flex-1 flex-col", false: null } },
 });
 
 const dataTableFrame = cva("overflow-hidden rounded-lg border border-border", {
