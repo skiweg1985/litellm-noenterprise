@@ -18,9 +18,12 @@ export default defineConfig({
         "--unsafely-treat-insecure-origin-as-secure=http://proxy:4000",
       ],
     },
-    trace: "off",
+    // Bound every action so a stuck step fails with its own error instead of the test timeout.
+    actionTimeout: 15000,
+    navigationTimeout: 30000,
+    trace: "retain-on-failure",
     video: "off",
-    screenshot: "off",
+    screenshot: "only-on-failure",
   },
   projects: [
     { name: "desktop", use: { viewport: { width: 1440, height: 900 } } },
