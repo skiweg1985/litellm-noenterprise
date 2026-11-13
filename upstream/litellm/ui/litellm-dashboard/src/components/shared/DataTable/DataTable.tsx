@@ -58,18 +58,21 @@ const INTERACTIVE_SELECTOR = "button, a, input, select, textarea, [role=checkbox
 
 const noop = () => {};
 
+// Filling the viewport starts at md. On phones the toolbar, banners and pagination
+// can take the whole height and would collapse the rows to zero; there the table
+// keeps its natural height and the page scrolls.
 const dataTableRoot = cva("w-full", {
-  variants: { fill: { true: "flex h-full min-h-0 flex-1 flex-col", false: null } },
+  variants: { fill: { true: "md:flex md:h-full md:min-h-0 md:flex-1 md:flex-col", false: null } },
 });
 
 const dataTableFrame = cva("overflow-hidden rounded-lg border border-border", {
-  variants: { fill: { true: "flex min-h-0 flex-1 flex-col", false: null } },
+  variants: { fill: { true: "md:flex md:min-h-0 md:flex-1 md:flex-col", false: null } },
 });
 
 const dataTableScroller = cva("", {
   variants: {
     sticky: { true: "overflow-auto [&_[data-slot=table-container]]:overflow-visible", false: "overflow-x-auto" },
-    fill: { true: "min-h-0 flex-1", false: null },
+    fill: { true: "md:min-h-0 md:flex-1", false: null },
     stretchEmpty: { true: "[container-type:inline-size] [&_[data-slot=table-container]]:h-full", false: null },
   },
 });

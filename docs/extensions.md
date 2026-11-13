@@ -249,6 +249,166 @@ WebP, and SVG and retains the PNG fallback for providers without media metadata.
 Provider-reported cost is retained. Token usage is reported only when the provider
 supplies the counts; per-image cost is not converted into invented token usage.
 
+## Talk to GPT-Live on Azure
+
+GPT-Live is a full-duplex voice model. It keeps talking while background work
+runs and hands that work to the client. Clients connect to
+`wss://<proxy>/v1/live/sessions` with a virtual key or an OIDC API token and name
+a public model in the first event:
+
+```json
+{"type": "session.start", "session": {"model": "gpt-live-1", "instructions": "Answer briefly."}}
+```
+
+Add the model like any Azure model: `azure/<deployment>` with the resource's
+API base and credential. A named credential works too. The deployment must run
+`gpt-live-1`. If its name differs, set `base_model: azure/gpt-live-1` in the
+model info or set `input_cost_per_second`. Without a price the session is
+refused. Turn off the background health check for the model, because the
+Realtime health check calls a path that GPT-Live does not serve.
+
+The proxy checks the key's model access, budget, limits and pre-call hooks
+before it connects. The router picks the deployment and resolves its
+credentials, which never reach the client. Azure receives the start event with
+the deployment name as model. Then the proxy forwards Azure events unchanged and
+accepts these client events: `session.input_audio.append`,
+`session.input_audio.mute`, `session.input_audio.unmute`,
+`session.instructions.append`, `session.thinking.append`,
+`session.commentary.append` and `session.close`. Any other event is answered
+with an `error` event and dropped; the session continues. Binary or malformed
+frames, duplicate fields and frames over 256 KiB end the session.
+
+Only client delegation is accepted. With Responses delegation Azure would call
+the background model itself, outside the proxy's keys and logs. In client
+delegation the client receives `session.delegation.created`, runs the task as an
+ordinary request through the proxy, for example `/v1/responses` with any model
+and its tools, and returns the result:
+
+```json
+{"type": "session.commentary.append", "delegation_id": "<delegation.id>", "content": "It is about 8 pm in Tokyo."}
+```
+
+`session.thinking.append` with the same ID adds quiet progress context. The
+delegation event carries no text. The task follows from the transcript events
+since the previous delegation.
+
+Sessions end after `GPT_LIVE_MAX_SESSION_SECONDS`, 1800 by default. When the
+client disconnects or the limit is reached, the proxy sends `session.close` so
+Azure reports the final usage. Budgets are checked when a session starts, not
+during it.
+
+Each session produces one log entry with call type `_arealtime`. Its cost is the
+session seconds Azure reports in `session.closed`, multiplied by the model's
+price per second. Silence counts, because Azure bills the session duration. If
+the connection breaks before `session.closed`, the time since `session.started`
+is billed when it exceeds the last reported value.
+`metadata.spend_logs_metadata.gpt_live` records the seconds, their source, the
+deployment, the number of client delegations and why the session ended. Audio
+and transcripts are not logged. A session that Azure refuses is logged as a
+failure without cost.
+
+### Connect over WebRTC
+
+With WebRTC the audio flows directly between the device and Azure; the proxy
+handles the setup and the control channel. Send the session and the SDP offer
+to the same path:
+
+```http
+POST /v1/live/sessions
+Authorization: Bearer <virtual key>
+
+{"session": {"model": "gpt-live-1", "delegation": {"type": "client"}},
+ "transport": {"type": "webrtc", "sdp": "v=0..."}}
+```
+
+The proxy runs the same checks as for the WebSocket and forwards the offer to
+the deployment. An `OpenAI-Safety-Identifier` header is passed on. The answer
+is `201` with `{"session": {"id": "<id>"}, "transport": {"type": "webrtc", "sdp": "<answer>"}}`.
+Azure's own refusals, such as an offer without audio, keep their status and
+message.
+
+Right after the setup the proxy opens its own control connection to the
+session. It records usage, enforces `GPT_LIVE_MAX_SESSION_SECONDS` and bills
+the session even if the client never attaches. To receive transcripts and
+delegations, connect to `wss://<proxy>/v1/live/sessions/<id>/attach` with the
+same key. Events that arrived before the attach are replayed, up to 200. A
+different key gets 403; an unknown or ended session gets 404. Only one client
+can attach at a time. The attach accepts the same client events as the
+WebSocket, including `delegation_id: null`. Unsupported events are dropped and
+logged without an `error` event, because clients may end the conversation on
+any error.
+
+Billing starts with the setup. If Azure closes the control connection without
+`session.closed`, for example after the device hung up, the time since the
+setup is billed.
+
+WebRTC sessions live in the memory of the worker that created them. With more
+than one proxy worker, route the attach to the same worker or use a single
+worker.
+
+GPT-Live through OpenAI's own API and Responses delegation are not supported.
+
+## Translate speech with Azure Realtime Translate
+
+Azure Realtime Translate turns continuous speech into translated audio and
+text. Clients connect with a virtual key or an OIDC API token:
+
+```text
+wss://<proxy>/v1/realtime/translations?model=<public model>
+Authorization: Bearer <virtual key>
+```
+
+`model` must be the only query parameter. Add the model like any Azure model:
+`azure/<deployment>` with the resource's HTTPS origin as API base, a credential
+and `realtime_protocol: GA`. The deployment must run `gpt-realtime-translate`.
+If its name differs, set `base_model: azure/gpt-realtime-translate` in the model
+info. The price comes from `input_cost_per_second` of the deployment or from
+LiteLLM's price list, otherwise from Microsoft's list price of USD 2.04 per
+audio hour. Turn off the background health check for the model.
+
+The proxy checks the key's model access, budget, limits and pre-call hooks
+before it connects, and the router picks the deployment. Then the client sets
+the output language and appends base64 PCM16 mono audio at 24 kHz:
+
+```json
+{"type": "session.update", "session": {"audio": {"output": {"language": "en"}}}}
+{"type": "session.input_audio_buffer.append", "audio": "<base64 pcm16>"}
+```
+
+Azure streams `session.output_audio.delta` and
+`session.output_transcript.delta` while audio keeps coming; there is no
+`response.create`. A `session.update` may also set
+`audio.input.noise_reduction` to `{"type": "near_field"}`, `{"type": "far_field"}`
+or `null`, and `audio.input.transcription` to `{"model": "gpt-live-transcribe"}`
+or `null`. The transcription model is an Azure model name, not a proxy alias,
+and needs no model entry or key permission of its own. Source text then arrives
+as `session.input_transcript.delta` on the same socket.
+
+Any other event, other session settings, duplicate fields, binary frames and
+frames over 256 KiB end the session with an `error` event and close code 1008.
+An `error` from Azure ends the session with code 1011; its details are not
+forwarded, because they can echo request data. Sessions end after
+`LITELLM_TRANSLATE_MAX_SECONDS`, 600 by default, at most 3600.
+
+Each session produces one log entry with call type `_arealtime`. Azure reports
+no usage for translations, so the proxy counts the audio bytes it forwarded:
+the cost is the input audio seconds multiplied by the price per second. Sent
+silence counts; idle time and output do not.
+`metadata.spend_logs_metadata.realtime_translation` records the input and output
+seconds, the deployment, the Azure session ID and why the session ended. Audio
+and transcripts are not logged. A session that Azure refuses is logged as a
+failure without cost.
+
+Empty sessions are not logged: Azure accepted them, no audio went either way
+and the client closed normally. Clients open these to check that the service
+is reachable. Set `LITELLM_TRANSLATE_LOG_EMPTY_SESSIONS=true` to log them with
+zero cost. Sessions without audio that end any other way, for example with a
+rejected event or a broken connection, are always logged.
+
+Translation models are refused on `/v1/realtime` and on the realtime HTTP
+endpoints, because those would reach Azure without the duration limit and the
+audio count.
+
 ## Provider behavior
 
 - ChatGPT accepts the standard client request shape and handles an upstream SSE

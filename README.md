@@ -29,7 +29,9 @@ optional bulk assignment with a review of each change,
 per-attempt subscription logs, observed usage by subscription and connection revision,
 quota monitoring, provider compatibility fixes,
 parallel streamed tool-call handling, OpenRouter native image generation in the
-Playground, and an optional OpenRouter classifier.
+Playground, GPT-Live voice sessions on Azure over WebSocket or WebRTC with client delegation,
+continuous speech translation with Azure Realtime Translate, and an
+optional OpenRouter classifier.
 No subscription or external deployment is configured by default.
 
 ## Build and verify

@@ -21,6 +21,7 @@ test("subscription logs preserve dispatch attribution and support named filter d
   const api = async (path: string, method = "GET", body?: unknown) => page.evaluate(async ({ path, method, body }) => {
     const response = await fetch(path, {
       method,
+      signal: AbortSignal.timeout(20000),
       headers: { Authorization: "Bearer oidc-browser-session", "Content-Type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
@@ -82,6 +83,12 @@ test("subscription logs preserve dispatch attribution and support named filter d
     const row = page.getByRole("row").filter({ has: page.getByText(label, { exact: true }) });
     await expect(row).toHaveCount(1);
     await expect(page.getByRole("columnheader", { name: "Subscription", exact: true })).toBeVisible();
+    // Banners and wrapped filters must not squeeze the rows behind the sticky header.
+    const scroller = page.getByTestId("data-table-scroller").filter({ has: row });
+    await expect.poll(async () => {
+      const [frame, line] = await Promise.all([scroller.boundingBox(), row.boundingBox()]);
+      return Boolean(frame && line && line.height > 0 && line.y + line.height <= frame.y + frame.height + 1);
+    }).toBe(true);
     await row.getByText(label, { exact: true }).click();
     if (testInfo.project.name === "phone") {
       const viewport = page.viewportSize()!;

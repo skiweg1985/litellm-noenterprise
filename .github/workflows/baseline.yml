@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 60
     env:
       IMAGE: litellm-noenterprise:ci
+      CI_LOG_DIR: ${{ github.workspace }}/ci-logs
     steps:
       - name: Check out complete project history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,3 +84,13 @@ jobs:
           python3 scripts/test_identity.py "$IMAGE" --test-pattern test_subscription_headers.py
           python3 scripts/test_identity.py "$IMAGE" --proxy-workers 2 --test-pattern test_subscription_conversion.py
           python3 scripts/test_identity.py "$IMAGE" --proxy-workers 2 --test-pattern test_subscription_bulk.py
+      - name: Keep browser evidence and container logs from a failed run
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: baseline-failure-evidence
+          path: |
+            ci-logs/
+            upstream/litellm/tests/e2e/ui/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

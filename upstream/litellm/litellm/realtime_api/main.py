@@ -171,6 +171,9 @@ async def acreate_realtime_client_secret(
     request_data: Final = req.model_dump(exclude_none=True, exclude={"model"})
     if isinstance(request_data.get("session"), dict):
         request_data["session"] = _with_resolved_session_model(request_data["session"], model_name)
+    from litellm.proxy.extensions.realtime_translate.policy import reject_outside_route
+
+    reject_outside_route(model_name, kwargs.get("model_info"))
     return await base_llm_http_handler.async_realtime_client_secret_handler(
         api_base=resolved_api_base,
         api_key=resolved_api_key,
@@ -243,6 +246,9 @@ async def acreate_realtime_transcription_session(
     # transcription config that gets forwarded to the provider.
     if isinstance(request_data.get("input_audio_transcription"), dict):
         request_data["input_audio_transcription"]["model"] = model_name
+    from litellm.proxy.extensions.realtime_translate.policy import reject_outside_route
+
+    reject_outside_route(model_name, kwargs.get("model_info"))
     return await base_llm_http_handler.async_realtime_transcription_session_handler(
         api_base=resolved_api_base,
         api_key=resolved_api_key,
@@ -295,6 +301,9 @@ async def arealtime_calls(
         litellm_params={"api_base": resolved_api_base},
         custom_llm_provider=custom_llm_provider,
     )
+    from litellm.proxy.extensions.realtime_translate.policy import reject_outside_route
+
+    reject_outside_route(model_name, kwargs.get("model_info"))
     return await base_llm_http_handler.async_realtime_calls_handler(
         api_base=resolved_api_base,
         openai_ephemeral_key=openai_ephemeral_key,

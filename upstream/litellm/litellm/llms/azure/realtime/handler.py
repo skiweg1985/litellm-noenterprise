@@ -159,6 +159,37 @@ class AzureOpenAIRealtime(AzureChatCompletion):
         import websockets
         from websockets.asyncio.client import ClientConnection
 
+        # GPT-Live and translation sessions are marked in the ASGI scope by
+        # litellm.proxy.extensions.gpt_live.routes and .realtime_translate.routes.
+        _scope = getattr(websocket, "scope", None)
+        _scope = _scope if isinstance(_scope, dict) else {}
+        _gpt_live = _scope.get("litellm.gpt_live")
+        if _gpt_live is not None:
+            from litellm.proxy.extensions.gpt_live.relay import run_azure
+
+            return await run_azure(
+                websocket,
+                model=model,
+                api_base=api_base,
+                auth_headers=self.get_auth_headers(api_key=api_key, azure_ad_token=azure_ad_token),
+                logging_obj=logging_obj,
+                context=_gpt_live,
+            )
+        from litellm.proxy.extensions.realtime_translate.policy import model_info_of, reject_outside_route
+
+        _translate = _scope.get("litellm.realtime_translate")
+        if _translate is not None:
+            from litellm.proxy.extensions.realtime_translate.stream import run_azure as run_translation
+
+            return await run_translation(
+                websocket,
+                model=model,
+                api_base=api_base,
+                auth_headers=self.get_auth_headers(api_key=api_key, azure_ad_token=azure_ad_token),
+                logging_obj=logging_obj,
+                context=_translate,
+            )
+        reject_outside_route(model, model_info_of(logging_obj))
         if api_base is None:
             raise ValueError("api_base is required for Azure OpenAI calls")
         backend_uses_beta_protocol: Final = realtime_protocol is None or realtime_protocol.upper() not in ("GA", "V1")
