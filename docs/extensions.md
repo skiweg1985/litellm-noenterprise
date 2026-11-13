@@ -399,6 +399,12 @@ seconds, the deployment, the Azure session ID and why the session ended. Audio
 and transcripts are not logged. A session that Azure refuses is logged as a
 failure without cost.
 
+Empty sessions are not logged: Azure accepted them, no audio went either way
+and the client closed normally. Clients open these to check that the service
+is reachable. Set `LITELLM_TRANSLATE_LOG_EMPTY_SESSIONS=true` to log them with
+zero cost. Sessions without audio that end any other way, for example with a
+rejected event or a broken connection, are always logged.
+
 Translation models are refused on `/v1/realtime` and on the realtime HTTP
 endpoints, because those would reach Azure without the duration limit and the
 audio count.

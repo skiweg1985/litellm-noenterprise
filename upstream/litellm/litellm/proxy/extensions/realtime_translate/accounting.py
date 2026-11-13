@@ -3,7 +3,10 @@
 Azure reports no usage on the translation socket. The proxy counts the PCM16
 mono 24 kHz bytes it forwarded (48,000 bytes per second) and multiplies them
 by the per-second price. Sent silence counts; idle time and output do not.
-Each session produces exactly one log entry through LiteLLM's callbacks.
+Each session produces exactly one log entry through LiteLLM's callbacks,
+except an empty one: accepted by Azure, no audio in either direction and a
+normal client close. Clients send those to check reachability; they are not
+logged unless LITELLM_TRANSLATE_LOG_EMPTY_SESSIONS is set.
 """
 
 import base64
@@ -11,7 +14,7 @@ import math
 import time
 from datetime import datetime
 
-from .policy import TranslationError
+from .policy import TranslationError, log_empty_sessions
 
 BYTES_PER_SECOND = 48000
 # Microsoft Global Standard list price, USD 2.04 per audio hour. Used when
@@ -93,6 +96,16 @@ class SessionAccounting:
             except (TypeError, ValueError):
                 pass
 
+    def is_empty(self):
+        """Accepted by Azure, no audio either way, closed normally: a reachability probe."""
+        return (
+            self.connected
+            and self.input_bytes == 0
+            and self.output_bytes == 0
+            and self.first_output_seconds is None
+            and self.end_reason == "client_close"
+        )
+
     def summary(self):
         seconds = self.input_bytes / BYTES_PER_SECOND
         return {
@@ -123,6 +136,10 @@ class SessionAccounting:
             success_key = success_key or REALTIME_SESSION_SUCCESS_LOGGED_KEY
             failure_key = failure_key or REALTIME_SESSION_FAILURE_LOGGED_KEY
         log = self.logging_obj
+        if self.is_empty() and not log_empty_sessions():
+            # No log entry and no marker: the route releases the budget
+            # reservation and the parallel-request slot itself.
+            return
         summary = self.summary()
         cost = summary["input_audio_seconds"] * self.rate
         params = log.model_call_details.setdefault("litellm_params", {})

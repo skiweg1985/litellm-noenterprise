@@ -284,6 +284,141 @@ class RelayTests(unittest.TestCase):
         self.assertEqual([], log.success)
 
 
+class EmptySessionTests(unittest.TestCase):
+    """Reachability probes: Azure accepts, the client closes without audio."""
+
+    def probe(self):
+        client = FakeClient()
+        client.disconnect()
+        return run(client, Upstream([{"type": "session.created", "session": {"id": "sess_probe"}}]))[0]
+
+    def test_empty_session_is_not_logged(self):
+        log = self.probe()
+        self.assertEqual(([], []), (log.success, log.failure))
+        self.assertNotIn("realtime_translation", log.model_call_details)
+
+    def test_empty_sessions_can_be_logged(self):
+        with patch.dict(os.environ, {"LITELLM_TRANSLATE_LOG_EMPTY_SESSIONS": "true"}):
+            log = self.probe()
+        self.assertEqual(1, len(log.success))
+        self.assertEqual(0, log.success[0]["result"]._hidden_params["response_cost"])
+
+    def test_sessions_without_audio_that_did_not_end_cleanly_are_logged(self):
+        client = FakeClient()
+        client.text({"type": "response.create"})
+        log, _ = run(client, Upstream())
+        self.assertEqual("rejected", log.success[0]["result"]._hidden_params["realtime_translation"]["end_reason"])
+
+        client = FakeClient()
+        client.inbox.put_nowait({"type": "websocket.disconnect", "code": 1006})
+        log, _ = run(client, Upstream())
+        self.assertEqual("client_disconnect",
+                         log.success[0]["result"]._hidden_params["realtime_translation"]["end_reason"])
+
+    def test_output_without_input_is_logged(self):
+        upstream = Upstream([{"type": "session.output_transcript.delta", "delta": "Hi"}])
+        client = FakeClient()
+
+        async def main():
+            async def close_later():
+                await asyncio.sleep(0.1)
+                client.disconnect()
+
+            asyncio.create_task(close_later())
+            await stream.run_azure(
+                client, model="gpt-realtime-translate", api_base="https://res.services.ai.azure.com",
+                auth_headers={}, logging_obj=log, context={"alias": "a"}, connect=Connect(upstream),
+            )
+
+        log = FakeLog({"metadata": {}, "input_cost_per_second": 0.001})
+        asyncio.run(asyncio.wait_for(main(), 10))
+        self.assertEqual(1, len(log.success))
+
+
+class FakeProxy:
+    """The parts of proxy_server the route uses, with a real relay behind route_request."""
+
+    class ProxyException(Exception):
+        pass
+
+    REALTIME_REQUEST_SCOPE_TEMPLATE = {"type": "http", "method": "POST", "path": "/v1/realtime", "headers": []}
+
+    def __init__(self, upstream):
+        self.upstream = upstream
+        self.released = []
+        self.log = FakeLog({"metadata": {}, "input_cost_per_second": 0.001})
+        self.llm_router = SimpleNamespace(get_model_list=lambda model_name: [DEPLOYMENT])
+        self.llm_model_list = [DEPLOYMENT]
+        proxy = self
+
+        class Processing:
+            def __init__(self, data):
+                self.data = data
+
+            async def common_processing_pre_call_logic(self, **kwargs):
+                return dict(self.data), proxy.log
+
+        self.ProxyBaseLLMRequestProcessing = Processing
+        for name in ("general_settings", "version", "proxy_logging_obj", "proxy_config", "user_model",
+                     "user_temperature", "user_request_timeout", "user_max_tokens", "user_api_base"):
+            setattr(self, name, None)
+
+    def realtime_request_body(self, model):
+        return json.dumps({"model": model}).encode()
+
+    async def can_key_call_resolved_model(self, **kwargs):
+        return True
+
+    async def route_request(self, data, **kwargs):
+        websocket = data["websocket"]
+        return stream.run_azure(
+            websocket, model="gpt-realtime-translate", api_base="https://res.services.ai.azure.com",
+            auth_headers={}, logging_obj=self.log,
+            context=websocket.scope["litellm.realtime_translate"], connect=Connect(self.upstream),
+        )
+
+    async def _release_realtime_budget_reservation(self, auth):
+        self.released.append("budget")
+
+    async def _release_realtime_max_parallel_slot(self, auth):
+        self.released.append("slot")
+
+
+class RouteSocket(FakeClient):
+    def __init__(self):
+        super().__init__()
+        self.scope = {"type": "websocket", "path": "/v1/realtime/translations", "headers": []}
+        self.headers = {}
+        self.query_params = QueryParams("model=azure-live-translate")
+        self.url = "ws://proxy/v1/realtime/translations?model=azure-live-translate"
+
+    async def accept(self, **kwargs):
+        pass
+
+
+class RouteTests(unittest.TestCase):
+    def run_route(self, *events):
+        from litellm.proxy.extensions.realtime_translate import routes
+
+        proxy = FakeProxy(Upstream([{"type": "session.created", "session": {"id": "s"}}]))
+        socket = RouteSocket()
+        for event in events:
+            socket.text(event)
+        socket.disconnect()
+        asyncio.run(asyncio.wait_for(routes.handle(socket, SimpleNamespace(api_key="k"), proxy), 10))
+        return proxy
+
+    def test_empty_session_releases_reservations_without_a_log(self):
+        proxy = self.run_route()
+        self.assertEqual(([], []), (proxy.log.success, proxy.log.failure))
+        self.assertEqual(["budget", "slot"], proxy.released)
+
+    def test_logged_session_leaves_release_to_the_callbacks(self):
+        proxy = self.run_route(APPEND)
+        self.assertEqual(1, len(proxy.log.success))
+        self.assertEqual([], proxy.released)
+
+
 class IntegrationTests(unittest.TestCase):
     def test_route_is_registered_and_an_llm_api_route(self):
         from litellm.proxy.auth.route_checks import RouteChecks

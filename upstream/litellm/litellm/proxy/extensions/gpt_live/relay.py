@@ -132,6 +132,7 @@ async def run_azure(websocket, *, model, api_base, auth_headers, logging_obj, co
             logging_obj=logging_obj, context=context,
         )
     import websockets
+    from websockets.exceptions import InvalidStatus
 
     from litellm.llms.custom_httpx.http_handler import get_shared_realtime_ssl_context
 
@@ -159,7 +160,7 @@ async def run_azure(websocket, *, model, api_base, auth_headers, logging_obj, co
             "provider_disconnect": "Azure ended the GPT-Live connection.",
         }.get(accounting.end_reason, "GPT-Live session ended.")
         await close_client(websocket, 1000, message, notify=accounting.end_reason == "provider_disconnect")
-    except websockets.exceptions.InvalidStatus as exc:
+    except InvalidStatus as exc:
         status = exc.response.status_code
         if accounting is not None:
             accounting.end_reason = "upstream_refused"

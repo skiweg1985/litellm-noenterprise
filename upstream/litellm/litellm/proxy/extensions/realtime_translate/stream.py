@@ -103,6 +103,7 @@ async def relay(client, upstream, accounting, secrets=(), max_seconds=None):
 async def run_azure(websocket, *, model, api_base, auth_headers, logging_obj, context, connect=None):
     """Entry point from AzureOpenAIRealtime.async_realtime."""
     import websockets
+    from websockets.exceptions import InvalidStatus
 
     from litellm.llms.custom_httpx.http_handler import get_shared_realtime_ssl_context
 
@@ -125,7 +126,7 @@ async def run_azure(websocket, *, model, api_base, auth_headers, logging_obj, co
             accounting.connected = True
             accounting.end_reason = await relay(websocket, upstream, accounting, secrets, limit)
         await close_client(websocket, 1000, CLOSE_MESSAGES.get(accounting.end_reason, "Translation session ended."))
-    except websockets.exceptions.InvalidStatus as exc:
+    except InvalidStatus as exc:
         status = exc.response.status_code
         if accounting is not None:
             accounting.end_reason = "upstream_refused"
