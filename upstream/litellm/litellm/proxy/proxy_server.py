@@ -20741,6 +20741,11 @@ register_chatgpt_subscriptions(app)
 from litellm.proxy.extensions.gpt_live.routes import register as register_gpt_live
 
 register_gpt_live(app)
+
+# Azure Realtime Translate with server-side routing and audio billing.
+from litellm.proxy.extensions.realtime_translate.routes import register as register_realtime_translate
+
+register_realtime_translate(app)
 app.include_router(agent_skills_discovery_router)
 # Eager: /models/{name}:method overlaps with the OpenAI /models endpoint.
 app.include_router(google_router)

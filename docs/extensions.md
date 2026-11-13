@@ -348,6 +348,61 @@ worker.
 
 GPT-Live through OpenAI's own API and Responses delegation are not supported.
 
+## Translate speech with Azure Realtime Translate
+
+Azure Realtime Translate turns continuous speech into translated audio and
+text. Clients connect with a virtual key or an OIDC API token:
+
+```text
+wss://<proxy>/v1/realtime/translations?model=<public model>
+Authorization: Bearer <virtual key>
+```
+
+`model` must be the only query parameter. Add the model like any Azure model:
+`azure/<deployment>` with the resource's HTTPS origin as API base, a credential
+and `realtime_protocol: GA`. The deployment must run `gpt-realtime-translate`.
+If its name differs, set `base_model: azure/gpt-realtime-translate` in the model
+info. The price comes from `input_cost_per_second` of the deployment or from
+LiteLLM's price list, otherwise from Microsoft's list price of USD 2.04 per
+audio hour. Turn off the background health check for the model.
+
+The proxy checks the key's model access, budget, limits and pre-call hooks
+before it connects, and the router picks the deployment. Then the client sets
+the output language and appends base64 PCM16 mono audio at 24 kHz:
+
+```json
+{"type": "session.update", "session": {"audio": {"output": {"language": "en"}}}}
+{"type": "session.input_audio_buffer.append", "audio": "<base64 pcm16>"}
+```
+
+Azure streams `session.output_audio.delta` and
+`session.output_transcript.delta` while audio keeps coming; there is no
+`response.create`. A `session.update` may also set
+`audio.input.noise_reduction` to `{"type": "near_field"}`, `{"type": "far_field"}`
+or `null`, and `audio.input.transcription` to `{"model": "gpt-live-transcribe"}`
+or `null`. The transcription model is an Azure model name, not a proxy alias,
+and needs no model entry or key permission of its own. Source text then arrives
+as `session.input_transcript.delta` on the same socket.
+
+Any other event, other session settings, duplicate fields, binary frames and
+frames over 256 KiB end the session with an `error` event and close code 1008.
+An `error` from Azure ends the session with code 1011; its details are not
+forwarded, because they can echo request data. Sessions end after
+`LITELLM_TRANSLATE_MAX_SECONDS`, 600 by default, at most 3600.
+
+Each session produces one log entry with call type `_arealtime`. Azure reports
+no usage for translations, so the proxy counts the audio bytes it forwarded:
+the cost is the input audio seconds multiplied by the price per second. Sent
+silence counts; idle time and output do not.
+`metadata.spend_logs_metadata.realtime_translation` records the input and output
+seconds, the deployment, the Azure session ID and why the session ended. Audio
+and transcripts are not logged. A session that Azure refuses is logged as a
+failure without cost.
+
+Translation models are refused on `/v1/realtime` and on the realtime HTTP
+endpoints, because those would reach Azure without the duration limit and the
+audio count.
+
 ## Provider behavior
 
 - ChatGPT accepts the standard client request shape and handles an upstream SSE
