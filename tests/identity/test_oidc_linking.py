@@ -298,10 +298,11 @@ class LinkingTests(unittest.TestCase):
         # Run before inventory bootstrap, matching an imported user's first request.
         self.subject = "historical-browser"
         self.email = self.subject + "@example.test"
+        # Earlier suites add users; the default page would hide the seeded row.
+        listed = self.client.get("/user/list", params={"user_email": self.email})
+        self.assertEqual(listed.status_code, 200, listed.text)
         before = next(
-            u
-            for u in self.client.get("/user/list").json()["users"]
-            if u["user_email"] == self.email
+            u for u in listed.json()["users"] if u["user_email"] == self.email
         )
         self.assertEqual(self.login(roles=[]).status_code, 403)
         self.assertEqual(self.login().status_code, 303)
