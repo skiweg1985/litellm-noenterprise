@@ -52,6 +52,8 @@ It requires no live provider credentials.
 
 See [source provenance, build limitations, and updates](docs/upstream.md) and
 [existing MCP capabilities](docs/upstream-capabilities.md).
+[Changes from upstream](docs/customizations.md) lists every deviation from
+LiteLLM 1.106.6, the pull request that introduced it, and the files it touches.
 
 ## Work
 
