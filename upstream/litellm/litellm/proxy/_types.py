@@ -441,6 +441,8 @@ class LiteLLMRoutes(enum.Enum):
         "/realtime?{model}",
         "/v1/realtime?{model}",
         "/openai/v1/realtime?{model}",
+        # Realtime Translate
+        "/v1/realtime/translations",
         # GPT-Live
         "/v1/live/sessions",
         "/live/sessions",
