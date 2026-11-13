@@ -16,7 +16,7 @@ jobs:
   baseline-amd64:
     name: Linux AMD64 baseline
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       IMAGE: litellm-noenterprise:ci
       CI_LOG_DIR: ${{ github.workspace }}/ci-logs
@@ -56,6 +56,15 @@ jobs:
         run: |
           python3 scripts/test_identity.py "$IMAGE" --browser
           python3 scripts/test_identity.py "$IMAGE" --browser --browser-admin-disabled
+      - name: Exercise native OIDC setup and shared-worker activation
+        run: |
+          python3 scripts/test_identity.py "$IMAGE" --oidc-settings --proxy-workers 2 --test-pattern test_oidc_settings.py
+          python3 scripts/test_identity.py "$IMAGE" --oidc-settings --oidc-empty-salt --test-pattern test_oidc_empty_salt.py
+          python3 scripts/test_identity.py "$IMAGE" --oidc-settings --browser --browser-proxy-port 0
+      - name: Exercise reviewed OIDC account linking
+        run: |
+          python3 scripts/test_identity.py "$IMAGE" --proxy-workers 2 --test-pattern test_oidc_linking.py
+          python3 scripts/test_identity.py "$IMAGE" --oidc-linking --browser --browser-proxy-port 0
       - name: Exercise OpenRouter image generation through the API and Playground
         run: python3 scripts/test_openrouter_images.py "$IMAGE"
       - name: Exercise independent provider and subscription extensions

@@ -106,8 +106,8 @@ class LoginTests(unittest.TestCase):
         self.assertEqual(self.login().status_code, 303)
         self.assertEqual(self.browser.get("/oidc/session").json()["user_id"], first)
         self.actor(sub="different-user", oid="stable-other")
-        self.assertEqual(self.login().status_code, 303)
-        self.assertNotEqual(self.browser.get("/oidc/session").json()["user_id"], first)
+        self.assertEqual(self.login().status_code, 403)
+        self.assertEqual(self.browser.get("/oidc/session").status_code, 401)
 
     def test_missing_admission_rejects_new_and_existing_accounts(self):
         self.actor(oid="never-admitted", roles=[])
@@ -187,8 +187,8 @@ class LoginTests(unittest.TestCase):
         update = httpx.post(
             BASE + "/user/update", headers=headers, json={"user_id": user_id, "metadata": forged}, trust_env=False
         )
-        self.assertEqual(update.status_code, 200, update.text)
-        self.assertEqual(self.browser.get("/oidc/session").status_code, 401)
+        self.assertEqual(update.status_code, 409, update.text)
+        self.assertEqual(self.browser.get("/oidc/session").json()["role"], "internal_user")
 
     def test_replaying_old_metadata_does_not_restore_revoked_session(self):
         httpx.post(
@@ -205,7 +205,7 @@ class LoginTests(unittest.TestCase):
         update = httpx.post(
             BASE + "/user/update", headers=headers, json={"user_id": user_id, "metadata": metadata}, trust_env=False
         )
-        self.assertEqual(update.status_code, 200, update.text)
+        self.assertEqual(update.status_code, 409, update.text)
         self.assertEqual(self.browser.get("/oidc/session").status_code, 401)
 
     def test_another_user_cannot_reuse_a_mcp_session(self):
@@ -238,7 +238,7 @@ class LoginTests(unittest.TestCase):
         session_id = initialized.headers["mcp-session-id"]
         httpx.post(
             ISSUER + "/control/actor",
-            json={"sub": "bob", "oid": "stable-bob", "email": "shared@example.test", "roles": ["access", "admin"]},
+            json={"sub": "bob", "oid": "stable-bob", "email": "bob@example.test", "roles": ["access", "admin"]},
             trust_env=False,
         )
         other = httpx.Client(base_url=BASE, follow_redirects=False, trust_env=False)

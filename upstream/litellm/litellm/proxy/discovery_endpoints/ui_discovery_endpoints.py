@@ -2,7 +2,7 @@
 import os
 from typing import Final
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from litellm.proxy._experimental.mcp_server.stdio_gate import is_mcp_stdio_enabled
 from litellm.proxy.common_utils.html_forms.default_credentials_hint import should_hide_default_credentials_hint
@@ -27,7 +27,14 @@ async def get_ui_config():
     admin_ui_disabled: Final = os.getenv("DISABLE_ADMIN_UI", "false").lower() == "true"
     hide_default_credentials_hint: Final = should_hide_default_credentials_hint(general_settings)
 
-    sso_configured: Final = has_user_setup_sso()
+    from litellm.proxy.auth.oidc_identity import settings as oidc_settings
+
+    try:
+        independent_sso = oidc_settings() is not None
+    except HTTPException:
+        # Keep the native recovery login available if OIDC storage fails.
+        independent_sso = False
+    sso_configured: Final = independent_sso or has_user_setup_sso()
 
     from litellm.proxy.proxy_server import proxy_config
 
