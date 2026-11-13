@@ -159,6 +159,8 @@ while merging an upstream update; vendor ancestry remained reachable.
    with the new import, including removals. Commit only that reviewed snapshot.
 4. Merge `vendor/litellm` into the update branch with a normal merge commit.
    Resolve conflicts in independent patches and update build dependencies.
+   [Changes from upstream](customizations.md) lists every patch and the files
+   it touches.
 5. Run source, image, runtime, and feature checks. Push the vendor/update branches
    and open a PR targeting protected `main`.
 6. Merge through the PR with a merge commit. Do not squash or rebase away vendor

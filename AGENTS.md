@@ -2,6 +2,8 @@
 
 Write short, factual documentation in English. Keep `README.md` current
 with the project's purpose, implementation status, and next steps.
+When a change adds or modifies files under `upstream/litellm`, update
+`docs/customizations.md` in the same pull request.
 
 ## Git workflow
 
