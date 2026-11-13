@@ -84,7 +84,8 @@ test("subscription logs preserve dispatch attribution and support named filter d
     await expect(row).toHaveCount(1);
     await expect(page.getByRole("columnheader", { name: "Subscription", exact: true })).toBeVisible();
     // Banners and wrapped filters must not squeeze the rows behind the sticky header.
-    await expect.poll(async () => (await page.getByTestId("data-table-scroller").boundingBox())?.height ?? 0).toBeGreaterThan(200);
+    const scroller = page.getByTestId("data-table-scroller").filter({ has: row });
+    await expect.poll(async () => (await scroller.boundingBox())?.height ?? 0).toBeGreaterThan(200);
     await row.getByText(label, { exact: true }).click();
     if (testInfo.project.name === "phone") {
       const viewport = page.viewportSize()!;
