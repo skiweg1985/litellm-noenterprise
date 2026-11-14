@@ -47,6 +47,7 @@ test files.
 | [Azure Realtime Translate](#azure-realtime-translate) | #38, #40 | [extensions.md](extensions.md#translate-speech-with-azure-realtime-translate) |
 | [Nova Sonic voice sessions on Bedrock](#nova-sonic-on-bedrock) | #45 | [extensions.md](extensions.md#talk-to-nova-sonic-on-bedrock) |
 | [Dashboard fixes](#dashboard-fixes) | #41 | — |
+| [Removed upstream features](#removed-upstream-features) | #46 | — |
 
 Pull request numbers refer to
 [skiweg1985/litellm-noenterprise](https://github.com/skiweg1985/litellm-noenterprise/pulls?q=is%3Apr+is%3Amerged).
@@ -225,12 +226,16 @@ Introduced in #45 (spec #44).
   banners and pagination collapsed the rows behind the sticky header; there the
   table now keeps its natural height and the page scrolls.
 
-## Planned removals
+## Removed upstream features
 
-- [#42](https://github.com/skiweg1985/litellm-noenterprise/issues/42):
-  remove the upstream upgrade banner and its unauthenticated request to the
-  GitHub releases API. It points to BerriAI releases that this distribution
-  does not install directly.
+- #46 (issue #42): no upgrade banner. Upstream's banner pointed to BerriAI
+  releases, which this distribution receives only through the reviewed vendor
+  import, and every proxy asked the GitHub releases API for them without
+  authentication. `app/(dashboard)/layout.tsx` no longer renders
+  `UpgradeBanner`, and `proxy/proxy_server.py` no longer registers
+  `/get/latest_release_info`. `components/UpgradeBanner.tsx`, its hook and
+  `ui_crud_endpoints/latest_release_endpoints.py` stay unused in the tree to
+  keep upstream merges small.
 
 ## Update checklist
 
