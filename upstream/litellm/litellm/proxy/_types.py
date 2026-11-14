@@ -448,6 +448,9 @@ class LiteLLMRoutes(enum.Enum):
         "/live/sessions",
         "/v1/live/sessions/{session_id}/attach",
         "/live/sessions/{session_id}/attach",
+        # Nova Sonic
+        "/v1/sonic/sessions",
+        "/sonic/sessions",
         # realtime (GA WebRTC HTTP routes)
         "/realtime/client_secrets",
         "/v1/realtime/client_secrets",

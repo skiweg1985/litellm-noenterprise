@@ -340,8 +340,29 @@ class BedrockRealtime(BaseAWSLLM):
                 InvokeModelWithBidirectionalStreamOperationInput(model_id=model)
             )
 
+        # Sessions from litellm.proxy.extensions.nova_sonic.routes keep Bedrock's own event format.
+        _scope = getattr(websocket, "scope", None)
+        _nova_sonic = _scope.get("litellm.nova_sonic") if isinstance(_scope, dict) else None
         try:
-            await self._run_session(websocket, open_bidirectional_stream, model, logging_obj, pending_session_update)
+            if _nova_sonic is not None:
+                from litellm.proxy.extensions.nova_sonic.relay import run_bedrock
+
+                await run_bedrock(
+                    websocket,
+                    model=model,
+                    open_stream=open_bidirectional_stream,
+                    logging_obj=logging_obj,
+                    context=_nova_sonic,
+                    secrets=(
+                        frozen_credentials.access_key,
+                        frozen_credentials.secret_key,
+                        frozen_credentials.token,
+                    ),
+                )
+            else:
+                await self._run_session(
+                    websocket, open_bidirectional_stream, model, logging_obj, pending_session_update
+                )
         finally:
             await _close_bedrock_client(bedrock_client)
 

@@ -10,7 +10,8 @@ parser.add_argument('--output', type=Path, default=Path('runtime/requirements.in
 args=parser.parse_args()
 project=tomllib.loads((args.source/'pyproject.toml').read_text())['project']
 extras=project['optional-dependencies']
-deps=project['dependencies'] + extras['proxy'] + extras['extra_proxy']
+# bedrock-realtime: Nova Sonic voice sessions need the bidirectional stream SDK.
+deps=project['dependencies'] + extras['proxy'] + extras['extra_proxy'] + extras['bedrock-realtime']
 deps=[d for d in deps if not d.startswith(('litellm-enterprise', 'litellm-proxy-extras'))]
 deps+=tomllib.loads((args.source/'litellm-proxy-extras/pyproject.toml').read_text())['project']['dependencies']
 args.output.parent.mkdir(parents=True,exist_ok=True)
