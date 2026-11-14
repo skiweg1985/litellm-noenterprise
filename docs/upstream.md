@@ -115,7 +115,8 @@ The image audit verifies document hashes, and the smoke check downloads a notice
 through the running UI. Running all baseline command tests also requires Node.js.
 
 `runtime/requirements.in` is generated from the reviewed upstream core, proxy,
-and extra-proxy dependency lists, excluding the two locally built packages.
+extra-proxy and bedrock-realtime dependency lists, excluding the two locally
+built packages.
 After dependency changes, regenerate and review the lock:
 
 ```sh

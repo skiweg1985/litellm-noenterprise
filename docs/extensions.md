@@ -409,6 +409,73 @@ Translation models are refused on `/v1/realtime` and on the realtime HTTP
 endpoints, because those would reach Azure without the duration limit and the
 audio count.
 
+## Talk to Nova Sonic on Bedrock
+
+Amazon Nova Sonic is a speech-to-speech model on Bedrock. Clients that speak
+Bedrock's own event format for `InvokeModelWithBidirectionalStream` connect
+with a virtual key or an OIDC API token and name a public model:
+
+```text
+wss://<proxy>/v1/sonic/sessions?model=<public model>
+Authorization: Bearer <virtual key>
+```
+
+Add the model as `bedrock/amazon.nova-2-5-sonic` with `aws_region_name` of a
+region that serves it, for example `eu-north-1`, and the usual AWS credentials
+(`aws_access_key_id` and `aws_secret_access_key`, a role or a named
+credential). The credentials only need `bedrock:InvokeModel` on the model. If
+the deployment uses another model ID, set
+`base_model: bedrock/amazon.nova-2-5-sonic` or the four token prices
+`input_cost_per_audio_token`, `input_cost_per_token`,
+`output_cost_per_audio_token` and `output_cost_per_token`. Without a price the
+session is refused.
+
+The proxy checks the key's model access, budget, limits and pre-call hooks,
+and the router picks the deployment. Its credentials stay on the server. Every
+WebSocket text frame carries one Bedrock event and is forwarded as it is:
+
+```json
+{"event": {"sessionStart": {"inferenceConfiguration": {"maxTokens": 1024}}}}
+{"event": {"audioInput": {"promptName": "p", "contentName": "mic", "content": "<base64 pcm16>"}}}
+```
+
+The client may send `sessionStart`, `promptStart`, `contentStart`,
+`audioInput`, `textInput`, `toolResult`, `contentEnd`, `promptEnd` and
+`sessionEnd`. Tools run on the client: `promptStart.toolConfiguration` accepts
+only `toolSpec` entries with `name`, `description` and `inputSchema`, plus
+`toolChoice`. When Nova sends `toolUse`, the client does the work, for example
+as an ordinary proxy request, and answers with `toolResult`. Bedrock's output
+events reach the client unchanged, including events that are not documented
+yet, such as `userSpeechStart`.
+
+Errors from the proxy itself have their own shape, so they cannot be mistaken
+for a Bedrock event:
+
+```json
+{"error": {"type": "invalid_request_error", "message": "Event usageEvent is not supported."}}
+```
+
+An unsupported event or tool configuration is answered this way and dropped;
+the session continues. Binary or malformed frames, duplicate fields and frames
+over 256 KiB end the session. A Bedrock exception ends it with close code 1011;
+the error frame carries the exception name, such as `ValidationException`, as
+its type and Bedrock's message.
+
+Bedrock ends a stream after at most 8 minutes. The proxy then closes the
+WebSocket; the client opens a new session and passes the earlier conversation
+as text. When the client disconnects, the proxy closes open content, the prompt
+and the session in Bedrock's order, so that Bedrock reports the final usage.
+
+Each stream produces one log entry with call type `_arealtime`. Its cost comes
+from the last `usageEvent`: speech and text tokens in both directions, each
+multiplied by its price. `metadata.spend_logs_metadata.nova_sonic` records the
+tokens, the deployment, the number of tool uses and why the stream ended. Audio
+and transcripts are not logged. A stream that Bedrock refuses is logged as a
+failure without cost.
+
+`/v1/realtime` with Bedrock models keeps upstream's translation to the OpenAI
+Realtime protocol.
+
 ## Provider behavior
 
 - ChatGPT accepts the standard client request shape and handles an upstream SSE

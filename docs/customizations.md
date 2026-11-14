@@ -29,7 +29,7 @@ git diff --name-status origin/vendor/litellm origin/main -- upstream/litellm \
   | grep -vE '\.test\.|/tests?/|test_'
 ```
 
-On 2026-11-13 this showed 79 modified and 74 added upstream files, without
+On 2026-11-14 this showed 80 modified and 79 added upstream files, without
 test files.
 
 ## Overview
@@ -45,6 +45,7 @@ test files.
 | [OpenRouter image generation](#openrouter-image-generation) | #26 | [extensions.md](extensions.md#generate-images-with-openrouter) |
 | [GPT-Live voice sessions on Azure](#gpt-live-on-azure) | #35, #37 | [extensions.md](extensions.md#talk-to-gpt-live-on-azure) |
 | [Azure Realtime Translate](#azure-realtime-translate) | #38, #40 | [extensions.md](extensions.md#translate-speech-with-azure-realtime-translate) |
+| [Nova Sonic voice sessions on Bedrock](#nova-sonic-on-bedrock) | #45 | [extensions.md](extensions.md#talk-to-nova-sonic-on-bedrock) |
 | [Dashboard fixes](#dashboard-fixes) | #41 | — |
 
 Pull request numbers refer to
@@ -203,6 +204,19 @@ Introduced in #38. #40 skips spend logs for sessions without audio.
   `proxy/proxy_server.py`.
 - `LITELLM_TRANSLATE_MAX_SECONDS` limits a session (default 600, at most
   3600).
+
+## Nova Sonic on Bedrock
+
+Introduced in #45 (spec #44).
+
+- New package `litellm/proxy/extensions/nova_sonic/`: `/v1/sonic/sessions`
+  route, relay of Bedrock's native events, policy and token accounting.
+- Hooks: `llms/bedrock/realtime/handler.py` (marked sessions go to the relay
+  after credentials are resolved), `proxy/_types.py`, `proxy/proxy_server.py`.
+- Dependency: `scripts/runtime_requirements.py` adds upstream's
+  `bedrock-realtime` extra (`aws-sdk-bedrock-runtime[awscrt]`) to
+  `runtime/requirements.in` and the lock. This also enables upstream's
+  `/v1/realtime` for Bedrock models.
 
 ## Dashboard fixes
 

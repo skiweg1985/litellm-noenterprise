@@ -20755,6 +20755,11 @@ register_gpt_live(app)
 from litellm.proxy.extensions.realtime_translate.routes import register as register_realtime_translate
 
 register_realtime_translate(app)
+
+# Nova Sonic voice sessions on Bedrock in Bedrock's own event format.
+from litellm.proxy.extensions.nova_sonic.routes import register as register_nova_sonic
+
+register_nova_sonic(app)
 app.include_router(agent_skills_discovery_router)
 # Eager: /models/{name}:method overlaps with the OpenAI /models endpoint.
 app.include_router(google_router)

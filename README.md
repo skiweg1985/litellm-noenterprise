@@ -30,7 +30,8 @@ per-attempt subscription logs, observed usage by subscription and connection rev
 quota monitoring, provider compatibility fixes,
 parallel streamed tool-call handling, OpenRouter native image generation in the
 Playground, GPT-Live voice sessions on Azure over WebSocket or WebRTC with client delegation,
-continuous speech translation with Azure Realtime Translate, and an
+continuous speech translation with Azure Realtime Translate,
+Nova Sonic voice sessions on Bedrock in Bedrock's own event format, and an
 optional OpenRouter classifier.
 No subscription or external deployment is configured by default.
 
