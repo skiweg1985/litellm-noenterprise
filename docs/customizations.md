@@ -41,7 +41,7 @@ test files.
 | [OIDC setup in SSO Settings, account linking, Entra preset](#oidc-settings-and-account-linking) | #28, #31, #33 | [identity.md](identity.md#configure-in-the-dashboard) |
 | [Personal MCP connections](#personal-mcp-connections) | #8 | [identity.md](identity.md#manage-personal-connections) |
 | [Provider compatibility fixes](#provider-compatibility-fixes) | #16 | [extensions.md](extensions.md#provider-behavior) |
-| [ChatGPT subscriptions](#chatgpt-subscriptions) | #16, #24 | [extensions.md](extensions.md#manage-chatgpt-subscriptions) |
+| [ChatGPT subscriptions](#chatgpt-subscriptions) | #16, #24, #47 | [extensions.md](extensions.md#manage-chatgpt-subscriptions) |
 | [OpenRouter image generation](#openrouter-image-generation) | #26 | [extensions.md](extensions.md#generate-images-with-openrouter) |
 | [GPT-Live voice sessions on Azure](#gpt-live-on-azure) | #35, #37 | [extensions.md](extensions.md#talk-to-gpt-live-on-azure) |
 | [Azure Realtime Translate](#azure-realtime-translate) | #38, #40 | [extensions.md](extensions.md#translate-speech-with-azure-realtime-translate) |
@@ -144,7 +144,7 @@ Introduced in #16.
 
 ## ChatGPT subscriptions
 
-Introduced in #16, extended in #24.
+Introduced in #16, extended in #24 and #47.
 
 New package `litellm/proxy/extensions/chatgpt_subscriptions/`: account
 registry and lifecycle, device sign-in, token storage, fixed assignment,
