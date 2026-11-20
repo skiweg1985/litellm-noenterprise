@@ -171,6 +171,10 @@ Hooks in upstream files:
   subscription columns, filters and attempt details in request logs
   (`components/logs/`), navigation entries (`leftnav.tsx`,
   `page_metadata.ts`), API types (`scripts/gen-api-types.mjs`, `lib/http/`).
+- Model catalog: the account catalog is requested as Codex CLI 0.171.0
+  (`chatgpt_subscriptions/service.py`), so GPT-6.2 Sol and Astra are offered.
+  `model_prices_and_context_window.json` and its backup copy add
+  `chatgpt/gpt-6.2-sol` and `chatgpt/gpt-6.2-astra`, taken from upstream main.
 
 ## OpenRouter image generation
 

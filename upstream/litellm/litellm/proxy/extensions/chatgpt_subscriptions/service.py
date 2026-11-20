@@ -16,7 +16,7 @@ from . import tokens
 USAGE_URL = os.getenv("CHATGPT_USAGE_URL", "https://chatgpt.com/backend-api/wham/usage")
 MODELS_URL = os.getenv("CHATGPT_MODELS_URL", "https://chatgpt.com/backend-api/codex/models")
 # The models endpoint leaves out models that need a newer Codex CLI than this.
-CODEX_CLIENT_VERSION = os.getenv("CHATGPT_CODEX_CLIENT_VERSION", "0.159.2")
+CODEX_CLIENT_VERSION = os.getenv("CHATGPT_CODEX_CLIENT_VERSION", "0.171.0")
 
 
 class MonitoringError(Exception):
