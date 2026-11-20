@@ -41,7 +41,7 @@ test files.
 | [OIDC setup in SSO Settings, account linking, Entra preset](#oidc-settings-and-account-linking) | #28, #31, #33 | [identity.md](identity.md#configure-in-the-dashboard) |
 | [Personal MCP connections](#personal-mcp-connections) | #8 | [identity.md](identity.md#manage-personal-connections) |
 | [Provider compatibility fixes](#provider-compatibility-fixes) | #16 | [extensions.md](extensions.md#provider-behavior) |
-| [ChatGPT subscriptions](#chatgpt-subscriptions) | #16, #24 | [extensions.md](extensions.md#manage-chatgpt-subscriptions) |
+| [ChatGPT subscriptions](#chatgpt-subscriptions) | #16, #24, #47 | [extensions.md](extensions.md#manage-chatgpt-subscriptions) |
 | [OpenRouter image generation](#openrouter-image-generation) | #26 | [extensions.md](extensions.md#generate-images-with-openrouter) |
 | [GPT-Live voice sessions on Azure](#gpt-live-on-azure) | #35, #37 | [extensions.md](extensions.md#talk-to-gpt-live-on-azure) |
 | [Azure Realtime Translate](#azure-realtime-translate) | #38, #40 | [extensions.md](extensions.md#translate-speech-with-azure-realtime-translate) |
@@ -144,7 +144,7 @@ Introduced in #16.
 
 ## ChatGPT subscriptions
 
-Introduced in #16, extended in #24.
+Introduced in #16, extended in #24 and #47.
 
 New package `litellm/proxy/extensions/chatgpt_subscriptions/`: account
 registry and lifecycle, device sign-in, token storage, fixed assignment,
@@ -171,6 +171,10 @@ Hooks in upstream files:
   subscription columns, filters and attempt details in request logs
   (`components/logs/`), navigation entries (`leftnav.tsx`,
   `page_metadata.ts`), API types (`scripts/gen-api-types.mjs`, `lib/http/`).
+- Model catalog: the account catalog is requested as Codex CLI 0.171.0
+  (`chatgpt_subscriptions/service.py`), so GPT-6.2 Sol and Astra are offered.
+  `model_prices_and_context_window.json` and its backup copy add
+  `chatgpt/gpt-6.2-sol` and `chatgpt/gpt-6.2-astra`, taken from upstream main.
 
 ## OpenRouter image generation
 

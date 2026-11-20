@@ -132,6 +132,12 @@ model_list:
       litellm_credential_name: subscription-default
 ```
 
+The catalog comes from OpenAI's Codex models endpoint, which lists only models
+supported by the requesting Codex CLI version. The proxy identifies as Codex CLI
+0.171.0, the first release with GPT-6.2 Sol and Astra. If a model available in
+the current Codex CLI is missing from the catalog, set
+`CHATGPT_CODEX_CLIENT_VERSION` to that Codex release and restart the proxy.
+
 The `chatgpt-account:` value is an account selector, not a provider secret.
 Missing or unknown selectors fail instead of falling back to another account.
 Request logs record the subscription actually used at each provider attempt. Catalog visibility does not
