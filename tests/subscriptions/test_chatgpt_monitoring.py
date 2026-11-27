@@ -333,12 +333,12 @@ class MonitoringTests(unittest.TestCase):
         def handle(req):
             self.calls.append(req)
             self.assertEqual(
-                str(req.url), "https://chatgpt.com/backend-api/codex/models?client_version=0.159.2"
+                str(req.url), "https://chatgpt.com/backend-api/codex/models?client_version=0.171.0"
             )
             self.assertEqual(req.headers["Authorization"], "Bearer secret-access-marker")
             self.assertEqual(req.headers["ChatGPT-Account-ID"], "test-account")
             self.assertEqual(req.headers["originator"], "codex_cli_rs")
-            self.assertEqual(req.headers["version"], "0.159.2")
+            self.assertEqual(req.headers["version"], "0.171.0")
             return httpx.Response(status, json=data if data is not None else models_payload())
 
         return ModelsService(httpx.MockTransport(handle))

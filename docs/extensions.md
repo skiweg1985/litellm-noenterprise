@@ -60,6 +60,9 @@ their subscription in the model edit form. Configuration-backed models display
 their assignment but remain read-only.
 
 The server checks the selected subscription and current model catalog when saving.
+The catalog request reports Codex CLI 0.171.0; older client versions do not
+list newer models such as GPT-6.2. Set `CHATGPT_CODEX_CLIENT_VERSION` to report
+another version.
 If the catalog is unavailable, retry after refreshing the connection. Existing
 models remain visible. A fixed assignment cannot fall back to another model or
 use a caller-supplied subscription selector; disconnecting its account makes new
