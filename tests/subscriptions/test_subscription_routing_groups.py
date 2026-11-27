@@ -147,3 +147,15 @@ class RoutingGroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(litellm.utils.get_order_filtered_deployments(result, target_order=None), members)
         self.assertEqual([r["model_info"]["id"] for r in
                           litellm.utils.get_order_filtered_deployments(result, target_order=2)], ["azure"])
+
+    async def test_retry_policy_leaves_strategy_routers_to_pre_routing(self):
+        router = litellm.Router(model_list=[
+            {"model_name": "tier", "litellm_params": {"model": "openai/gpt-4o", "api_key": "synthetic"}},
+            {"model_name": "auto", "litellm_params": {"model": "auto_router/complexity_router",
+                                                      "complexity_router_default_model": "tier"}},
+        ])
+        self.addCleanup(router.discard)
+        self.assertIsNone(await retry_policy(router, "auto", dict(self.data)))
+        response = await router.acompletion(model="auto", messages=[{"role": "user", "content": "hi"}],
+                                            mock_response="ok", **self.data)
+        self.assertEqual(response.choices[0].message.content, "ok")

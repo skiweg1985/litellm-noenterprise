@@ -16,10 +16,18 @@ class Policy:
 
 
 async def retry_policy(router, model, kwargs):
+    import litellm
+
     await hydrate_missing_parent(router, model)
-    _, parents = router._common_checks_available_deployment(
-        model=model, request_kwargs=kwargs
-    )
+    try:
+        _, parents = router._common_checks_available_deployment(
+            model=model, request_kwargs=kwargs
+        )
+    except litellm.BadRequestError:
+        # Strategy routers such as auto_router/complexity_router only hold
+        # markers until the pre-routing hook picks a model. Native routing
+        # reports a model that is really unknown.
+        return None
     parents = [parents] if isinstance(parents, dict) else parents
     managed = [p for p in parents if (p.get("model_info") or {}).get(ASSIGNMENT)]
     # A routing group keeps native retries and order fallback across its members.
