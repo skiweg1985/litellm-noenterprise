@@ -12,16 +12,21 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import Layout from "./layout";
+import MySubscriptionUsagePage from "./my-subscription-usage/page";
 
 vi.unmock("@/app/(dashboard)/hooks/useAuthorized");
 vi.unmock("@/lib/toast");
+const route = vi.hoisted(() => ({ pathname: "/ui/guardrails", adminDisabled: false, replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: route.replace }),
   useSearchParams: () => new URLSearchParams(),
-  usePathname: () => "/ui/guardrails",
+  usePathname: () => route.pathname,
 }));
 
 beforeEach(() => {
+  route.pathname = "/ui/guardrails";
+  route.adminDisabled = false;
+  route.replace.mockClear();
   testQueryClient.clear();
   localStorage.clear();
   const claims = {
@@ -40,7 +45,11 @@ beforeEach(() => {
       const path = new URL(url, "http://localhost").pathname;
       switch (path) {
         case "/litellm/.well-known/litellm-ui-config":
-          return Response.json({ server_root_path: "", proxy_base_url: "", admin_ui_disabled: false });
+          return Response.json({ server_root_path: "", proxy_base_url: "", admin_ui_disabled: route.adminDisabled });
+        case "/oidc/session":
+          return Response.json({ user_id: "personal-user", role: "internal_user", admin_access: false });
+        case "/chatgpt/fair-use/me":
+          return Response.json({ user_id: "personal-user", accounts: [] });
         case "/get/ui_settings":
         case "/get/ui_theme_settings":
           return Response.json({ values: {} });
@@ -185,5 +194,56 @@ describe("dashboard overlay boundaries", () => {
     expect(within(navigation).getByRole("link", { name: "Virtual Keys" })).toBeVisible();
     await user.keyboard("{Escape}");
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+});
+
+describe("personal subscription route", () => {
+  it("links to personal usage in an internal user's dashboard navigation", async () => {
+    const claims = {
+      key: "sk-internal-test",
+      user_id: "reader",
+      user_role: "internal_user",
+      exp: Date.now() / 1000 + 3600,
+    };
+    document.cookie = `token=${btoa(JSON.stringify({ alg: "none" }))}.${btoa(JSON.stringify(claims))}.test; Path=/`;
+    renderWithProviders(
+      <AuthProvider>
+        <Layout>
+          <h1>Home</h1>
+        </Layout>
+      </AuthProvider>,
+    );
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Open navigation" }));
+    const nav = within(await screen.findByRole("dialog", { name: "Navigation" }));
+    expect(nav.getByRole("link", { name: "My subscription usage" })).toHaveAttribute(
+      "href",
+      "/ui/my-subscription-usage",
+    );
+  });
+
+  it("opens for a verified personal-only OIDC session with the administration UI disabled", async () => {
+    route.pathname = "/ui/my-subscription-usage/";
+    const claims = {
+      key: "oidc-browser-session",
+      user_id: "personal-user",
+      user_role: "internal_user",
+      exp: Date.now() / 1000 + 3600,
+    };
+    document.cookie = `token=${btoa(JSON.stringify({ alg: "none" }))}.${btoa(JSON.stringify(claims))}.test; Path=/`;
+    route.adminDisabled = true;
+    renderWithProviders(
+      <AuthProvider>
+        <Layout>
+          <MySubscriptionUsagePage />
+        </Layout>
+      </AuthProvider>,
+    );
+    expect(await screen.findByText("No subscriptions available to you.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "My subscription usage" })).toHaveAttribute(
+      "href",
+      "/ui/my-subscription-usage",
+    );
+    expect(screen.queryByRole("button", { name: "Open navigation" })).not.toBeInTheDocument();
+    expect(route.replace).not.toHaveBeenCalled();
   });
 });

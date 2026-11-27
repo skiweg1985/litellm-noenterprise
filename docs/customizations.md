@@ -34,19 +34,19 @@ test files.
 
 ## Overview
 
-| Change | Pull requests | Guide |
-| --- | --- | --- |
-| [Enterprise-free source selection and image](#enterprise-free-distribution) | #8 | [upstream.md](upstream.md) |
-| [OIDC browser identity and provider-token API access](#oidc-identity) | #8 | [identity.md](identity.md) |
-| [OIDC setup in SSO Settings, account linking, Entra preset](#oidc-settings-and-account-linking) | #28, #31, #33 | [identity.md](identity.md#configure-in-the-dashboard) |
-| [Personal MCP connections](#personal-mcp-connections) | #8 | [identity.md](identity.md#manage-personal-connections) |
-| [Provider compatibility fixes](#provider-compatibility-fixes) | #16 | [extensions.md](extensions.md#provider-behavior) |
-| [ChatGPT subscriptions](#chatgpt-subscriptions) | #16, #24 | [extensions.md](extensions.md#manage-chatgpt-subscriptions) |
-| [OpenRouter image generation](#openrouter-image-generation) | #26 | [extensions.md](extensions.md#generate-images-with-openrouter) |
-| [GPT-Live voice sessions on Azure](#gpt-live-on-azure) | #35, #37 | [extensions.md](extensions.md#talk-to-gpt-live-on-azure) |
-| [Azure Realtime Translate](#azure-realtime-translate) | #38, #40 | [extensions.md](extensions.md#translate-speech-with-azure-realtime-translate) |
-| [Nova Sonic voice sessions on Bedrock](#nova-sonic-on-bedrock) | #45 | [extensions.md](extensions.md#talk-to-nova-sonic-on-bedrock) |
-| [Dashboard fixes](#dashboard-fixes) | #41 | — |
+| Change                                                                                          | Pull requests | Guide                                                                         |
+| ----------------------------------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------- |
+| [Enterprise-free source selection and image](#enterprise-free-distribution)                     | #8            | [upstream.md](upstream.md)                                                    |
+| [OIDC browser identity and provider-token API access](#oidc-identity)                           | #8            | [identity.md](identity.md)                                                    |
+| [OIDC setup in SSO Settings, account linking, Entra preset](#oidc-settings-and-account-linking) | #28, #31, #33 | [identity.md](identity.md#configure-in-the-dashboard)                         |
+| [Personal MCP connections](#personal-mcp-connections)                                           | #8            | [identity.md](identity.md#manage-personal-connections)                        |
+| [Provider compatibility fixes](#provider-compatibility-fixes)                                   | #16           | [extensions.md](extensions.md#provider-behavior)                              |
+| [ChatGPT subscriptions](#chatgpt-subscriptions)                                                 | #16, #24      | [extensions.md](extensions.md#manage-chatgpt-subscriptions)                   |
+| [OpenRouter image generation](#openrouter-image-generation)                                     | #26           | [extensions.md](extensions.md#generate-images-with-openrouter)                |
+| [GPT-Live voice sessions on Azure](#gpt-live-on-azure)                                          | #35, #37      | [extensions.md](extensions.md#talk-to-gpt-live-on-azure)                      |
+| [Azure Realtime Translate](#azure-realtime-translate)                                           | #38, #40      | [extensions.md](extensions.md#translate-speech-with-azure-realtime-translate) |
+| [Nova Sonic voice sessions on Bedrock](#nova-sonic-on-bedrock)                                  | #45           | [extensions.md](extensions.md#talk-to-nova-sonic-on-bedrock)                  |
+| [Dashboard fixes](#dashboard-fixes)                                                             | #41           | —                                                                             |
 
 Pull request numbers refer to
 [skiweg1985/litellm-noenterprise](https://github.com/skiweg1985/litellm-noenterprise/pulls?q=is%3Apr+is%3Amerged).
@@ -196,6 +196,23 @@ Hooks in upstream files:
   subscription columns, filters and attempt details in request logs
   (`components/logs/`), navigation entries (`leftnav.tsx`,
   `page_metadata.ts`), API types (`scripts/gen-api-types.mjs`, `lib/http/`).
+  Issue #48 adds the following dashboard changes (application paths are relative to `src/`).
+  - Subscription cards and admin status in `app/(dashboard)/chatgpt-subscriptions/page.tsx`,
+    `page.integration.test.tsx`, `fair-use/page.tsx` and `fair-use/page.integration.test.tsx`.
+  - Settings and status components in `components/subscriptions/fair-use/`:
+    `PolicyCard.tsx`, `MemberPicker.tsx`, `FactorsEditor.tsx`, `ModelWeightsEditor.tsx`,
+    `FairUseTable.tsx`, `queries.ts`, `presentation.ts` and `presentation.test.ts`.
+    Directory pickers use `components/common_components/team_dropdown.tsx` and
+    `components/common_components/UserDropdown.tsx`.
+  - Personal usage in `app/(dashboard)/my-subscription-usage/page.tsx` and
+    `page.integration.test.tsx`. Session handling and navigation use
+    `app/(dashboard)/hooks/useAuthorized.ts`, `app/(dashboard)/layout.tsx`,
+    `app/(dashboard)/layout.integration.test.tsx`, `components/leftnav.tsx`,
+    `components/page_metadata.ts` and `components/navbar.tsx`.
+  - `lib/http/subscriptionFairUse.ts` uses `lib/http/subscription-fair-use-schema.d.ts`,
+    generated by `scripts/gen-api-types.mjs --subscription-fair-use` and excluded
+    from formatting in `.prettierignore`. The browser scenario lives in
+    `tests/e2e/ui/personal/subscription-fair-use.spec.ts` under the upstream root.
 
 ## OpenRouter image generation
 

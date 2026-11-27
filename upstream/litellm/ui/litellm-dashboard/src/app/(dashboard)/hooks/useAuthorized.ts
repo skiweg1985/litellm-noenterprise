@@ -19,7 +19,8 @@ const useAuthorized = () => {
   const decoded = useMemo(() => decodeToken(token), [token]);
   const isTokenValid = useMemo(() => checkTokenValidity(token), [token]);
   const pathname = usePathname();
-  const personalPage = pathname?.replace(/\/+$/, "") === uiHref("connect").replace(/\/+$/, "");
+  const path = pathname?.replace(/\/+$/, "");
+  const personalPage = path === uiHref("connect") || path === uiHref("my-subscription-usage");
   const session = useOidcSession(decoded?.key ?? null, decoded?.user_id);
   const isLoading = isUIConfigLoading || (session.enabled && session.isPending);
   const isAuthorized =

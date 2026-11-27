@@ -1,5 +1,7 @@
 "use client";
 
+import { PolicyCard } from "@/components/subscriptions/fair-use/PolicyCard";
+import { useFairUseStatus } from "@/components/subscriptions/fair-use/queries";
 import Link from "next/link";
 import { SubscriptionBulkAssignment } from "@/components/subscriptions/SubscriptionBulkAssignment";
 import { subscriptionLogsLink } from "@/components/logs/request/subscriptionLogRouting";
@@ -339,12 +341,14 @@ function AccountCard({
   act,
   rename,
   assign,
+  settings,
 }: {
   account: SubscriptionAccount;
   busy: boolean;
   act: (request: ActionRequest) => void;
   rename: (account: SubscriptionAccount) => void;
   assign?: (account: SubscriptionAccount) => void;
+  settings: React.ReactNode;
 }) {
   const quota = account.quota?.limits.find((group) => group.id === "codex");
   const request: RequestAction = (steps, title, description) => {
@@ -450,6 +454,7 @@ function AccountCard({
           </p>
         )}
         <AccountDetails account={account} />
+        {settings}
         <Link
           className="text-sm text-primary underline"
           href={subscriptionLogsLink(uiHref("chatgpt-subscriptions/usage/"), {
@@ -532,27 +537,22 @@ function SubscriptionNameDialog({
   );
 }
 
-function RetiredSubscriptions({
+function SubscriptionCards({
   accounts,
-  act,
-  rename,
+  renderCard,
 }: {
   accounts: SubscriptionAccount[];
-  act: (request: ActionRequest) => void;
-  rename: (account: SubscriptionAccount) => void;
+  renderCard: (account: SubscriptionAccount) => React.ReactNode;
 }) {
+  const active = accounts.filter((account) => !account.retired);
+  const retired = accounts.filter((account) => account.retired);
   return (
     <>
-      {accounts.some((account) => account.retired) && (
+      {active.length ? active.map(renderCard) : <p>No active subscriptions. Choose Add subscription to get started.</p>}
+      {retired.length > 0 && (
         <details className="space-y-4">
-          <summary className="cursor-pointer font-medium">
-            Retired subscriptions ({accounts.filter((account) => account.retired).length})
-          </summary>
-          {accounts
-            .filter((account) => account.retired)
-            .map((account) => (
-              <AccountCard key={account.account} account={account} busy={false} act={act} rename={rename} />
-            ))}
+          <summary className="cursor-pointer font-medium">Retired subscriptions ({retired.length})</summary>
+          {retired.map(renderCard)}
         </details>
       )}
     </>
@@ -581,6 +581,18 @@ function AffectedModels({ confirmation }: { confirmation: ActionRequest | null }
 }
 
 function Subscriptions({ accessToken, userId }: { accessToken: string; userId: string | null }) {
+  const session = { accessToken, userId };
+  const status = useFairUseStatus(session);
+  const policies = new Map(status.data?.accounts.map((account) => [account.account, account]));
+  function settingsFor(account: SubscriptionAccount) {
+    const policy = policies.get(account.account);
+    if (status.isError || (!policy && !status.isPending)) return <p>Subscription settings are unavailable.</p>;
+    return policy ? (
+      <PolicyCard account={policy} session={session} retired={!!account.retired} />
+    ) : (
+      <p>Loading subscription settings…</p>
+    );
+  }
   const queryClient = useQueryClient();
   const key = ["chatgpt-subscriptions", userId];
   const [confirmation, setConfirmation] = useState<ActionRequest | null>(null);
@@ -597,7 +609,10 @@ function Subscriptions({ accessToken, userId }: { accessToken: string; userId: s
         ? renameSubscription(accessToken, account.account, displayName)
         : createSubscription(accessToken, displayName),
     onMutate: () => queryClient.cancelQueries({ queryKey: key }),
-    onSuccess: () => setNameDialog(null),
+    onSuccess: () => {
+      setNameDialog(null);
+      void status.refetch();
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
   };
   const nameMutation = useMutation(nameOptions);
@@ -626,7 +641,7 @@ function Subscriptions({ accessToken, userId }: { accessToken: string; userId: s
     },
   };
   const query = useQuery(options);
-  const authError = [query.error, mutation.error, nameMutation.error].find(
+  const authError = [status.error, query.error, mutation.error, nameMutation.error].find(
     (error) => error instanceof ApiError && [401, 403].includes(error.status),
   );
   const act = (request: ActionRequest) => {
@@ -636,6 +651,24 @@ function Subscriptions({ accessToken, userId }: { accessToken: string; userId: s
   };
   const busy = mutation.isPending || nameMutation.isPending;
   const unavailable = query.isPending || query.isError;
+  function renderCard(account: SubscriptionAccount) {
+    return (
+      <AccountCard
+        key={account.account}
+        account={account}
+        busy={busy || query.isFetching || query.isError}
+        act={act}
+        rename={openNameDialog}
+        assign={setBulkAccount}
+        settings={settingsFor(account)}
+      />
+    );
+  }
+  function refreshStatus() {
+    mutation.reset();
+    void status.refetch();
+    void query.refetch();
+  }
   if (authError)
     return (
       <div role="alert" className="p-6">
@@ -658,16 +691,16 @@ function Subscriptions({ accessToken, userId }: { accessToken: string; userId: s
           <Link className="self-center text-sm text-primary underline" href={uiHref("chatgpt-subscriptions/usage/")}>
             Observed usage
           </Link>
+          <Link className="self-center text-sm text-primary underline" href={uiHref("chatgpt-subscriptions/fair-use/")}>
+            Fair use
+          </Link>
           <Button disabled={unavailable || busy} onClick={() => openNameDialog()}>
             Add subscription
           </Button>
           <Button
             variant="outline"
             disabled={query.isFetching || mutation.isPending || nameMutation.isPending}
-            onClick={() => {
-              mutation.reset();
-              void query.refetch();
-            }}
+            onClick={refreshStatus}
           >
             Refresh status
           </Button>
@@ -694,22 +727,7 @@ function Subscriptions({ accessToken, userId }: { accessToken: string; userId: s
               </ul>
             </section>
           )}
-          {query.data.accounts.filter((account) => !account.retired).length === 0 && (
-            <p>No active subscriptions. Choose Add subscription to get started.</p>
-          )}
-          {query.data.accounts
-            .filter((account) => !account.retired)
-            .map((account) => (
-              <AccountCard
-                key={account.account}
-                account={account}
-                busy={busy || query.isFetching || query.isError}
-                act={act}
-                rename={openNameDialog}
-                assign={setBulkAccount}
-              />
-            ))}
-          <RetiredSubscriptions accounts={query.data.accounts} act={act} rename={openNameDialog} />
+          <SubscriptionCards accounts={query.data.accounts} renderCard={renderCard} />
         </>
       )}
       {bulkAccount && (
@@ -768,14 +786,15 @@ function Subscriptions({ accessToken, userId }: { accessToken: string; userId: s
 }
 
 export default function ChatGPTSubscriptionsPage() {
-  const { accessToken, userId, userRole, isLoading, isAuthorized } = useAuthorized();
+  const { accessToken, userId, userRole, isViewOnly, isLoading, isAuthorized } = useAuthorized();
   if (isLoading)
     return (
       <p className="p-6" role="status">
         Checking your session…
       </p>
     );
-  if (!isAuthorized || !accessToken || !isProxyAdminRole(userRole ?? ""))
+  const canManage = !isViewOnly && isProxyAdminRole(userRole ?? "");
+  if (!isAuthorized || !accessToken || !canManage)
     return (
       <p className="p-6" role="alert">
         Proxy administrator access is required to manage ChatGPT subscriptions.

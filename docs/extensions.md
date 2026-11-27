@@ -158,6 +158,8 @@ Proxy administrators can read or replace grants with
 LiteLLM team and user IDs, for example `{"teams":["engineering"],"users":[]}`.
 Two empty lists allow everyone. A user grant or the key's team grant allows
 access. A key without a team uses the user's current team memberships.
+On each subscription card, **Edit access** selects teams and users, and **Edit fair use**
+sets the 5-hour and weekly thresholds or turns fair use off.
 Directory lookups are cached for 60 seconds. Unknown IDs stay in the registry
 and appear in admin status. Retired accounts have read-only settings.
 
@@ -226,6 +228,11 @@ between allowance and share. Streams include them in the initial HTTP headers.
 subscriptions. `GET /chatgpt/api/fair-use/status` shows quota freshness, users,
 thresholds and unknown grant or factor IDs to administrators. Policy updates
 write before and after settings to the proxy audit log when enabled.
+
+Open **Fair use** beside **Observed usage** to review limits and reset times, change
+team or user factors, and edit model weights. Any signed-in user can open
+**My subscription usage** to see their own shares, allowances and reset times
+for permitted subscriptions.
 
 Counters use the proxy's coordination Redis when configured and process memory
 otherwise. On first use and window rollover the proxy rebuilds counts from
@@ -340,7 +347,10 @@ runs and hands that work to the client. Clients connect to
 a public model in the first event:
 
 ```json
-{"type": "session.start", "session": {"model": "gpt-live-1", "instructions": "Answer briefly."}}
+{
+  "type": "session.start",
+  "session": { "model": "gpt-live-1", "instructions": "Answer briefly." }
+}
 ```
 
 Add the model like any Azure model: `azure/<deployment>` with the resource's
@@ -368,7 +378,11 @@ ordinary request through the proxy, for example `/v1/responses` with any model
 and its tools, and returns the result:
 
 ```json
-{"type": "session.commentary.append", "delegation_id": "<delegation.id>", "content": "It is about 8 pm in Tokyo."}
+{
+  "type": "session.commentary.append",
+  "delegation_id": "<delegation.id>",
+  "content": "It is about 8 pm in Tokyo."
+}
 ```
 
 `session.thinking.append` with the same ID adds quiet progress context. The
@@ -535,7 +549,12 @@ Errors from the proxy itself have their own shape, so they cannot be mistaken
 for a Bedrock event:
 
 ```json
-{"error": {"type": "invalid_request_error", "message": "Event usageEvent is not supported."}}
+{
+  "error": {
+    "type": "invalid_request_error",
+    "message": "Event usageEvent is not supported."
+  }
+}
 ```
 
 An unsupported event or tool configuration is answered this way and dropped;
