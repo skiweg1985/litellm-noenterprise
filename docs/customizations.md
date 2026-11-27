@@ -158,6 +158,8 @@ currency check follows aliases and groups, and group candidates are expanded in
 place (`expansion.py`, `policy.py`).
 The reserve retry policy leaves strategy routers such as
 `auto_router/complexity_router` to the pre-routing hook (`policy.py`).
+Monitoring usage and PRTG routes also accept a unique active display name
+(`routes.py`).
 
 Issue #48 adds account grants and adaptive fair use. In the subscription package,
 `settings.py` and `registry.py` validate and persist version 2 policies.
