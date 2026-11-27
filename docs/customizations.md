@@ -153,6 +153,9 @@ observed usage and quota monitoring. Shared types are in
 `types/proxy/subscription_attribution.py`.
 The model catalog request reports Codex CLI 0.171.0, so the catalog lists
 GPT-6.2 (`service.py`, override with `CHATGPT_CODEX_CLIENT_VERSION`).
+Subscription models work as alias targets and routing-group members: the
+currency check follows aliases and groups, and group candidates are expanded in
+place (`expansion.py`, `policy.py`).
 
 Issue #48 adds account grants and adaptive fair use. In the subscription package,
 `settings.py` and `registry.py` validate and persist version 2 policies.

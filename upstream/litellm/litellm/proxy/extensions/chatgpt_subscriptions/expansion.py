@@ -94,6 +94,30 @@ async def hydrate_missing_parent(router, model):
         )
 
 
+def _routing_group(router, name):
+    getter = getattr(router, "get_routing_group", None)
+    return getter(name) if callable(getter) and isinstance(name, str) else None
+
+
+def reaches(requested, own):
+    """Whether calling `requested` routes to the model named `own`.
+
+    The router hands out alias and routing-group members under the requested
+    name, so a copy's name is the alias or group, not the model's own name.
+    """
+    if requested == own:
+        return True
+    from litellm.proxy.proxy_server import llm_router
+
+    if llm_router is None:
+        return False
+    target = llm_router.get_model_from_alias(model=requested) or requested
+    if target == own:
+        return True
+    group = _routing_group(llm_router, target)
+    return group is not None and own in group.models
+
+
 async def current_parent(parent):
     """No stale router copy may authorize changed or removed membership."""
     info = parent.get("model_info") or {}
@@ -106,11 +130,15 @@ async def current_parent(parent):
     row = await prisma_client.db.litellm_proxymodeltable.find_unique(
         where={"model_id": info["id"]}
     )
-    if row is None or row.model_name != parent["model_name"]:
+    if row is None or not reaches(parent["model_name"], row.model_name):
         raise unavailable("This model changed or was removed. Refresh the model list.")
+    params = _params(row.litellm_params)
+    # A routing group assigns its own priority to the member it re-emits.
+    if parent["model_name"] != row.model_name and (parent.get("litellm_params") or {}).get("order") is not None:
+        params["order"] = parent["litellm_params"]["order"]
     return {
-        "model_name": row.model_name,
-        "litellm_params": _params(row.litellm_params),
+        "model_name": parent["model_name"],
+        "litellm_params": params,
         "model_info": {
             **(row.model_info or {}),
             "id": row.model_id,
@@ -177,18 +205,56 @@ async def assert_dispatch_current(logging_obj):
         raise unavailable()
 
 
+def _managed(deployment):
+    return bool((deployment.get("model_info") or {}).get(ASSIGNMENT))
+
+
 async def expand_candidates(router, candidates, request_kwargs=None):
     parents = [candidates] if isinstance(candidates, dict) else candidates
-    managed = [p for p in parents if (p.get("model_info") or {}).get(ASSIGNMENT)]
-    if not managed:
+    if not any(_managed(p) for p in parents):
         from .enforcement import filter_config
 
         return await filter_config(candidates, request_kwargs)
-    if len(parents) != 1:
+    if len(parents) == 1:
+        return await _expand_parent(router, parents[0], request_kwargs, alone=True)
+    if len({p["model_name"] for p in parents}) != 1 or _routing_group(router, parents[0]["model_name"]) is None:
         raise unavailable(
             "This subscription model has conflicting deployments. Use a unique public model name."
         )
-    parent = await current_parent(managed[0])
+    return await _expand_group(router, parents, request_kwargs)
+
+
+async def _expand_group(router, parents, request_kwargs):
+    """Expand managed members of a routing group in place and keep the others.
+
+    The group's own strategy, priorities and order fallback still choose
+    between its members; a managed member contributes its eligible
+    subscriptions at the member's place in the group.
+    """
+    from .enforcement import FairUseLimitExceeded, SubscriptionAccessDenied, filter_config
+    import litellm
+
+    others = [p for p in parents if not _managed(p)]
+    kept = {id(p) for p in (await filter_config(others, request_kwargs) if others else [])}
+    result, denial = [], None
+    for parent in parents:
+        if not _managed(parent):
+            if id(parent) in kept:
+                result.append(parent)
+            continue
+        try:
+            result.extend(await _expand_parent(router, parent, request_kwargs, alone=False))
+        except (FairUseLimitExceeded, SubscriptionAccessDenied, litellm.ServiceUnavailableError) as exc:
+            # The group continues with its other members, as it would for an
+            # unavailable deployment.
+            denial = exc
+    if not result and denial is not None:
+        raise denial
+    return result
+
+
+async def _expand_parent(router, managed_parent, request_kwargs, alone):
+    parent = await current_parent(managed_parent)
     assignment = SubscriptionAssignment.model_validate(
         parent["model_info"].get(ASSIGNMENT)
     )
@@ -243,7 +309,8 @@ async def expand_candidates(router, candidates, request_kwargs=None):
         candidate["litellm_params"].update(
             api_key="chatgpt-account:" + account.name, litellm_credential_name=None
         )
-        if assignment.mode != "fixed":
+        # Inside a routing group the member keeps the group's priority.
+        if alone and assignment.mode != "fixed":
             candidate["litellm_params"]["order"] = (
                 index + 1 if assignment.mode == "priority" else 1
             )
@@ -259,7 +326,7 @@ async def expand_candidates(router, candidates, request_kwargs=None):
     result = [d for d, alias in zip(result, eligible) if alias in allowed]
     if not result:
         raise unavailable()
-    if request_kwargs is not None:
+    if alone and request_kwargs is not None:
         for key in (
             "_target_order",
             "_excluded_deployment_ids",
@@ -272,11 +339,11 @@ async def expand_candidates(router, candidates, request_kwargs=None):
 
 
 def choose_managed(candidates, model):
-    if (
-        not isinstance(candidates, list)
-        or not candidates
-        or not (candidates[0].get("model_info") or {}).get(MEMBER)
-    ):
+    if not isinstance(candidates, list) or not candidates:
+        return None
+    members = [(c.get("model_info") or {}).get(MEMBER) for c in candidates]
+    # Mixed routing-group candidates are left to the group's own strategy.
+    if not all(members) or len({m["parent"]["model_info"]["id"] for m in members}) != 1:
         return None
     mode = candidates[0]["model_info"][ASSIGNMENT]["mode"]
     if mode == "distribution":
