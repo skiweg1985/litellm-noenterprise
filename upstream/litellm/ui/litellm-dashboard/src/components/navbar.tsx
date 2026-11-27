@@ -174,6 +174,9 @@ function PersonalNavbar({ accessToken }: Pick<NavbarProps, "accessToken">) {
         <Link href={uiHref("connect")} aria-label="Personal connections" className="min-w-0">
           <img src={logoUrl || `${baseUrl}/get_image`} alt="LiteLLM" className="h-8 max-w-40 object-contain" />
         </Link>
+        <Link className="text-sm text-primary underline" href={uiHref("my-subscription-usage/")}>
+          My subscription usage
+        </Link>
         <div className="flex shrink-0 items-center gap-2">
           <ThemeToggle />
           <Button

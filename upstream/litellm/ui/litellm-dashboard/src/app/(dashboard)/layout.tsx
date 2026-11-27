@@ -211,19 +211,14 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
   const { accessToken, token, userID, authLoading, passwordResetRequired } = useAuth();
   const session = useOidcSession(accessToken, userID);
   const { data: uiConfig, isLoading: uiConfigLoading } = useUIConfig();
+  const dashboardRestricted = !session.data?.admin_access || uiConfig?.admin_ui_disabled;
+  const personalOnly = session.enabled && dashboardRestricted;
+  const personalUsage = pathname?.replace(/\/+$/, "") === uiHref("my-subscription-usage");
   useEffect(() => {
     if (!session.enabled || session.isPending || uiConfigLoading) return;
     if (session.isError) window.location.replace(getLoginUrl(getProxyBaseUrl()));
-    else if (!session.data?.admin_access || uiConfig?.admin_ui_disabled) router.replace(uiHref("connect"));
-  }, [
-    session.enabled,
-    session.isPending,
-    session.isError,
-    session.data?.admin_access,
-    uiConfig?.admin_ui_disabled,
-    uiConfigLoading,
-    router,
-  ]);
+    else if (personalOnly && !personalUsage) router.replace(uiHref("connect"));
+  }, [session.enabled, session.isPending, session.isError, personalOnly, personalUsage, uiConfigLoading, router]);
   const isInvitationFlow = Boolean(searchParams.get("invitation_id"));
 
   // Legacy invitation links point at /ui/?invitation_id=; the onboarding form now lives at its own
@@ -242,23 +237,27 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
     }
   }, [authLoading, passwordResetRequired, pathname, router]);
 
-  if (
-    authLoading ||
-    (!!token && !accessToken) ||
-    isInvitationFlow ||
-    (session.enabled &&
-      (session.isPending ||
-        session.isError ||
-        !session.data?.admin_access ||
-        uiConfigLoading ||
-        uiConfig?.admin_ui_disabled))
-  ) {
+  const waitingForToken = !!token && !accessToken;
+  const waitingForAuth = authLoading || waitingForToken || isInvitationFlow;
+  const verifiedSession = session.isSuccess && !!session.data;
+  const requiresRedirect = personalOnly && !personalUsage;
+  const waitingForOidc = session.enabled && (!verifiedSession || uiConfigLoading);
+  if (waitingForAuth || waitingForOidc || requiresRedirect) {
     return <LoadingScreen />;
   }
 
   return (
     <ThemeProvider accessToken={accessToken}>
-      <DashboardShell>{children}</DashboardShell>
+      {personalOnly ? (
+        <div className="flex h-dvh flex-col">
+          <Navbar accessToken={accessToken} isPublicPage={false} personal />
+          <main className="min-h-0 flex-1 overflow-auto">{children}</main>
+        </div>
+      ) : (
+        <PluginModeProviderWithAuth>
+          <DashboardShell>{children}</DashboardShell>
+        </PluginModeProviderWithAuth>
+      )}
     </ThemeProvider>
   );
 }
@@ -266,9 +265,7 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <Suspense fallback={<LoadingScreen />}>
-      <PluginModeProviderWithAuth>
-        <LayoutContent>{children}</LayoutContent>
-      </PluginModeProviderWithAuth>
+      <LayoutContent>{children}</LayoutContent>
     </Suspense>
   );
 }

@@ -8,7 +8,8 @@ import secrets
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from . import admin, bulk_assignment, observed_usage
+from . import admin, bulk_assignment, fair_use_api, observed_usage
+from .fair_use import quotas
 from .accounts import Accounts
 from .prtg import login_text, render
 from .service import ModelsService, MonitoringError, UsageService
@@ -16,16 +17,35 @@ from .service import ModelsService, MonitoringError, UsageService
 OVERVIEW = "/chatgpt/accounts"
 PREFIX = OVERVIEW + "/{name}/usage"
 UNKNOWN = "Unknown ChatGPT account."
+AMBIGUOUS = "Several ChatGPT subscriptions use this name. Use the subscription alias."
 PATHS = (OVERVIEW, PREFIX, PREFIX + "/prtg", admin.PAGE, admin.API, observed_usage.API)
-# Fields of an account that the monitoring key may see: no email, no ids.
-OVERVIEW_FIELDS = ("account", "state", "token_valid", "plan", "token_expires_at",
-                   "last_refresh_at", "refresh_rejected", "auto_login")
+# Fields of an account that the monitoring key may see: no email and no provider
+# account ids. subscription_id is the proxy's own id, also recorded in spend logs.
+OVERVIEW_FIELDS = ("account", "subscription_id", "display_name", "state", "token_valid", "plan",
+                   "token_expires_at", "last_refresh_at", "refresh_rejected", "auto_login")
 
 
 def configuration_text(found):
     names = ", ".join(sorted({p["deployment"] or p["id"] or "?" for p in found}))
     return (f"Configuration: {len(found)} ChatGPT deployment(s) without a valid "
             f"subscription ({names}). Requests to them fail. See /chatgpt/ui")
+
+
+def find_account(accounts, name):
+    """The subscription with this alias, or the one active subscription with this display name.
+
+    Dashboard-created subscriptions have generated aliases, so monitoring
+    sensors may address them by their display name instead.
+    """
+    account = accounts.get(name)
+    if account is not None:
+        return account, None
+    records = accounts.registry.records() if accounts.registry is not None else {}
+    matches = [alias for alias, record in records.items()
+               if record.get("display_name") == name and not record.get("retired")]
+    if len(matches) == 1:
+        return accounts.get(matches[0]), None
+    return None, AMBIGUOUS if matches else UNKNOWN
 
 
 def require_key(x_monitoring_key: str = Header(default="")):
@@ -43,13 +63,13 @@ def watch_with_server(app, accounts):
     @contextlib.asynccontextmanager
     async def lifespan(application):
         async with original(application) as state:
-            task = asyncio.ensure_future(accounts.run())
+            tasks = [asyncio.create_task(accounts.run()), asyncio.create_task(quotas.watch(accounts))]
             try:
                 yield state
             finally:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
                 await accounts.stop_logins()
 
     app.router.lifespan_context = lifespan
@@ -99,11 +119,12 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
 
     @router.get(PREFIX)
     async def usage(name: str):
-        account = accounts.get(name)
+        account, missing = find_account(accounts, name)
         if account is None:
-            return JSONResponse({"error": UNKNOWN}, status_code=404, headers={"Cache-Control": "no-store"})
+            return JSONResponse({"error": missing}, status_code=404, headers={"Cache-Control": "no-store"})
         if account.retired():
             raise HTTPException(409, "Subscription is retired.")
+        name = account.name
         services.setdefault(name, UsageService(account=name, path=account.path, transport=account.transport))
         try:
             result = await services[name].get()
@@ -121,16 +142,19 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
         limit_id: str = Query(default="codex", max_length=128),
         windows: str = Query(default="primary,secondary", max_length=32),
     ):
-        account = accounts.get(name)
+        account, missing = find_account(accounts, name)
         if account is None:
-            return JSONResponse({"prtg": {"error": 1, "text": UNKNOWN}}, status_code=404,
+            return JSONResponse({"prtg": {"error": 1, "text": missing}}, status_code=404,
                                 headers={"Cache-Control": "no-store"})
+        name = account.name
         services.setdefault(name, UsageService(account=name, path=account.path, transport=account.transport))
         status = account.status()
         broken = admin.problems(await admin.deployment_snapshot(deployments))
         # Alarm when requests fail now or once the token expires, and while a
         # sign-in with a different account waits for an admin.
-        if broken:
+        if account.retired():
+            result = {"prtg": {"error": 1, "text": "Subscription is retired. Remove this sensor or point it to another subscription."}}
+        elif broken:
             result = {"prtg": {"error": 1, "text": configuration_text(broken)}}
         elif status["pending_account"]:
             result = {"prtg": {"error": 1, "text": (
@@ -148,6 +172,7 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
         return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
     app.include_router(router)
+    app.include_router(fair_use_api.router(accounts, admin_dependency))
     app.include_router(observed_usage.router(accounts, admin_dependency))
     app.include_router(bulk_assignment.router(accounts, admin_dependency))
     for part in admin.router(accounts, services, admin_dependency, deployments=deployments, catalogs=catalogs):

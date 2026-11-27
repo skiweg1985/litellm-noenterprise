@@ -34,20 +34,20 @@ test files.
 
 ## Overview
 
-| Change | Pull requests | Guide |
-| --- | --- | --- |
-| [Enterprise-free source selection and image](#enterprise-free-distribution) | #8 | [upstream.md](upstream.md) |
-| [OIDC browser identity and provider-token API access](#oidc-identity) | #8 | [identity.md](identity.md) |
-| [OIDC setup in SSO Settings, account linking, Entra preset](#oidc-settings-and-account-linking) | #28, #31, #33 | [identity.md](identity.md#configure-in-the-dashboard) |
-| [Personal MCP connections](#personal-mcp-connections) | #8 | [identity.md](identity.md#manage-personal-connections) |
-| [Provider compatibility fixes](#provider-compatibility-fixes) | #16 | [extensions.md](extensions.md#provider-behavior) |
-| [ChatGPT subscriptions](#chatgpt-subscriptions) | #16, #24 | [extensions.md](extensions.md#manage-chatgpt-subscriptions) |
-| [OpenRouter image generation](#openrouter-image-generation) | #26 | [extensions.md](extensions.md#generate-images-with-openrouter) |
-| [GPT-Live voice sessions on Azure](#gpt-live-on-azure) | #35, #37 | [extensions.md](extensions.md#talk-to-gpt-live-on-azure) |
-| [Azure Realtime Translate](#azure-realtime-translate) | #38, #40 | [extensions.md](extensions.md#translate-speech-with-azure-realtime-translate) |
-| [Nova Sonic voice sessions on Bedrock](#nova-sonic-on-bedrock) | #45 | [extensions.md](extensions.md#talk-to-nova-sonic-on-bedrock) |
-| [Dashboard fixes](#dashboard-fixes) | #41 | — |
-| [Removed upstream features](#removed-upstream-features) | #46 | — |
+| Change                                                                                          | Pull requests | Guide                                                                         |
+| ----------------------------------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------- |
+| [Enterprise-free source selection and image](#enterprise-free-distribution)                     | #8            | [upstream.md](upstream.md)                                                    |
+| [OIDC browser identity and provider-token API access](#oidc-identity)                           | #8            | [identity.md](identity.md)                                                    |
+| [OIDC setup in SSO Settings, account linking, Entra preset](#oidc-settings-and-account-linking) | #28, #31, #33 | [identity.md](identity.md#configure-in-the-dashboard)                         |
+| [Personal MCP connections](#personal-mcp-connections)                                           | #8            | [identity.md](identity.md#manage-personal-connections)                        |
+| [Provider compatibility fixes](#provider-compatibility-fixes)                                   | #16           | [extensions.md](extensions.md#provider-behavior)                              |
+| [ChatGPT subscriptions](#chatgpt-subscriptions)                                                 | #16, #24      | [extensions.md](extensions.md#manage-chatgpt-subscriptions)                   |
+| [OpenRouter image generation](#openrouter-image-generation)                                     | #26           | [extensions.md](extensions.md#generate-images-with-openrouter)                |
+| [GPT-Live voice sessions on Azure](#gpt-live-on-azure)                                          | #35, #37      | [extensions.md](extensions.md#talk-to-gpt-live-on-azure)                      |
+| [Azure Realtime Translate](#azure-realtime-translate)                                           | #38, #40      | [extensions.md](extensions.md#translate-speech-with-azure-realtime-translate) |
+| [Nova Sonic voice sessions on Bedrock](#nova-sonic-on-bedrock)                                  | #45           | [extensions.md](extensions.md#talk-to-nova-sonic-on-bedrock)                  |
+| [Dashboard fixes](#dashboard-fixes)                                                             | #41           | —                                                                             |
+| [Removed upstream features](#removed-upstream-features)                                         | #46           | —                                                                             |
 
 Pull request numbers refer to
 [skiweg1985/litellm-noenterprise](https://github.com/skiweg1985/litellm-noenterprise/pulls?q=is%3Apr+is%3Amerged).
@@ -152,6 +152,43 @@ registry and lifecycle, device sign-in, token storage, fixed assignment,
 ordered reserves, distribution, bulk assignment, per-attempt attribution,
 observed usage and quota monitoring. Shared types are in
 `types/proxy/subscription_attribution.py`.
+The model catalog request reports Codex CLI 0.171.0, so the catalog lists
+GPT-6.2 (`service.py`, override with `CHATGPT_CODEX_CLIENT_VERSION`).
+Subscription models work as alias targets and routing-group members: the
+currency check follows aliases and groups, and group candidates are expanded in
+place (`expansion.py`, `policy.py`).
+The reserve retry policy leaves strategy routers such as
+`auto_router/complexity_router` to the pre-routing hook (`policy.py`).
+Monitoring usage and PRTG routes also accept a unique active display name
+(`routes.py`).
+
+Issue #48 adds account grants and adaptive fair use. In the subscription package,
+`settings.py` and `registry.py` validate and persist version 2 policies.
+`access.py` resolves identities and team memberships. `fair_use_math.py`,
+`fair_use.py` and `counters.py` evaluate quota windows and rebuild measured
+per-model token totals. `fair_use_weights.py` resolves list prices and registry
+overrides at evaluation time. `attribution.py` records optional
+`cached_input_tokens` in `types/proxy/subscription_attribution.py`.
+`enforcement.py` filters deployments and checks dispatch.
+`fair_use_api.py` serves management and personal status. The existing
+`admin.py`, `expansion.py`, `policy.py`, `attribution.py`, `routes.py` and
+`service.py` supply selector resolution, routing, completion events and refresh.
+The monitoring overview in `routes.py` also returns `display_name` and
+`subscription_id`, so cost dashboards can match dashboard-created
+subscriptions (`sub_<hex>`) to spend-log attempts.
+
+Fair-use hooks in LiteLLM:
+
+- `router.py`, `router_utils/cooldown_handlers.py`,
+  `router_utils/fallback_event_handlers.py` and `utils.py` end retries and
+  fallbacks for policy denials and preserve deployment health.
+- `proxy/route_llm_request.py` binds the authenticated caller and checks config
+  groups. `llms/custom_httpx/llm_http_handler.py` checks the dispatched credential.
+- `proxy/common_request_processing.py` supplies response headers.
+  `proxy/proxy_server.py` filters model listings and management detail.
+- `proxy/auth/oidc_identity.py` and `proxy/_types.py` admit the personal status
+  route. `proxy/management_helpers/audit_logs.py` supports enabled registry
+  audit records on this distribution.
 
 Hooks in upstream files:
 
@@ -172,6 +209,23 @@ Hooks in upstream files:
   subscription columns, filters and attempt details in request logs
   (`components/logs/`), navigation entries (`leftnav.tsx`,
   `page_metadata.ts`), API types (`scripts/gen-api-types.mjs`, `lib/http/`).
+  Issue #48 adds the following dashboard changes (application paths are relative to `src/`).
+  - Subscription cards and admin status in `app/(dashboard)/chatgpt-subscriptions/page.tsx`,
+    `page.integration.test.tsx`, `fair-use/page.tsx` and `fair-use/page.integration.test.tsx`.
+  - Settings and status components in `components/subscriptions/fair-use/`:
+    `PolicyCard.tsx`, `MemberPicker.tsx`, `FactorsEditor.tsx`, `ModelWeightsEditor.tsx`,
+    `FairUseTable.tsx`, `queries.ts`, `presentation.ts` and `presentation.test.ts`.
+    Directory pickers use `components/common_components/team_dropdown.tsx` and
+    `components/common_components/UserDropdown.tsx`.
+  - Personal usage in `app/(dashboard)/my-subscription-usage/page.tsx` and
+    `page.integration.test.tsx`. Session handling and navigation use
+    `app/(dashboard)/hooks/useAuthorized.ts`, `app/(dashboard)/layout.tsx`,
+    `app/(dashboard)/layout.integration.test.tsx`, `components/leftnav.tsx`,
+    `components/page_metadata.ts` and `components/navbar.tsx`.
+  - `lib/http/subscriptionFairUse.ts` uses `lib/http/subscription-fair-use-schema.d.ts`,
+    generated by `scripts/gen-api-types.mjs --subscription-fair-use` and excluded
+    from formatting in `.prettierignore`. The browser scenario lives in
+    `tests/e2e/ui/personal/subscription-fair-use.spec.ts` under the upstream root.
 
 ## OpenRouter image generation
 

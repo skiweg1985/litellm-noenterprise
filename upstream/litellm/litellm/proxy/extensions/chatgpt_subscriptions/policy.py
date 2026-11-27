@@ -16,13 +16,22 @@ class Policy:
 
 
 async def retry_policy(router, model, kwargs):
+    import litellm
+
     await hydrate_missing_parent(router, model)
-    _, parents = router._common_checks_available_deployment(
-        model=model, request_kwargs=kwargs
-    )
+    try:
+        _, parents = router._common_checks_available_deployment(
+            model=model, request_kwargs=kwargs
+        )
+    except litellm.BadRequestError:
+        # Strategy routers such as auto_router/complexity_router only hold
+        # markers until the pre-routing hook picks a model. Native routing
+        # reports a model that is really unknown.
+        return None
     parents = [parents] if isinstance(parents, dict) else parents
     managed = [p for p in parents if (p.get("model_info") or {}).get(ASSIGNMENT)]
-    if len(managed) != 1 or managed[0]["model_info"][ASSIGNMENT].get("mode") == "fixed":
+    # A routing group keeps native retries and order fallback across its members.
+    if len(parents) != 1 or len(managed) != 1 or managed[0]["model_info"][ASSIGNMENT].get("mode") == "fixed":
         return None
     parent = await current_parent(managed[0])
     assignment = SubscriptionAssignment.model_validate(parent["model_info"][ASSIGNMENT])
@@ -63,6 +72,8 @@ def cooldown_seconds(router, parent, error):
 
 async def record_failure(router, kwargs, error):
     """Skip failed members for this request; retain native shared cooldown state."""
+    if getattr(error, "subscription_policy_denial", False):
+        return False
     logging_obj = kwargs.get("litellm_logging_obj")
     selection = getattr(logging_obj, "_subscription_selection", None)
     from .attribution import snapshot

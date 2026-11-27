@@ -58,7 +58,7 @@ def _is_a2a_agent_model(model_name: object) -> bool:
     return isinstance(model_name, str) and model_name.startswith("a2a/")
 
 
-async def _raise_if_model_fully_blocked(llm_router: LitellmRouter, model_name: object, team_id: str | None) -> None:
+async def _raise_if_model_fully_blocked(llm_router: LitellmRouter, model_name: object, team_id: str | None, data: dict | None = None) -> None:
     if not isinstance(model_name, str) or not model_name:
         return
     if not isinstance(llm_router, litellm.Router):
@@ -83,6 +83,9 @@ async def _raise_if_model_fully_blocked(llm_router: LitellmRouter, model_name: o
                 request=httpx.Request(method="POST", url="https://github.com/BerriAI/litellm"),
             ),
         )
+
+    from litellm.proxy.extensions.chatgpt_subscriptions.enforcement import filter_config
+    await filter_config([d for d in deployments if not (d.get("model_info") or {}).get("blocked")], data)
 
 
 ROUTE_ENDPOINT_MAPPING: Final = {
@@ -638,6 +641,11 @@ async def _route_request_single_attempt(  # noqa: ANN202  # returns unawaited pr
 
     data.pop("enable_tag_filtering", None)
 
+    logging_obj = data.get("litellm_logging_obj")
+    from litellm.litellm_core_utils.litellm_logging import Logging
+    if isinstance(logging_obj, Logging) and user_api_key_dict is not None:
+        from litellm.proxy.extensions.chatgpt_subscriptions.access import Caller
+        logging_obj._subscription_caller = Caller.from_auth(user_api_key_dict)
     team_id: Final = get_team_id_from_data(data)
     router_model_names: Final = llm_router.model_names if llm_router is not None else []
     is_proxy_admin_without_team: Final = team_id is None and is_proxy_admin_request(data)
@@ -699,7 +707,7 @@ async def _route_request_single_attempt(  # noqa: ANN202  # returns unawaited pr
         else:
             return getattr(litellm, f"{route_type}")(**data)
     elif llm_router is not None:
-        await _raise_if_model_fully_blocked(llm_router=llm_router, model_name=data.get("model"), team_id=team_id)
+        await _raise_if_model_fully_blocked(llm_router=llm_router, model_name=data.get("model"), team_id=team_id, data=data)
         # Evals API: always route to litellm directly (not through router)
         # But extract model credentials if a model is provided
         if route_type in [

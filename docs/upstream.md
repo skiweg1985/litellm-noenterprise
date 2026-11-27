@@ -116,7 +116,10 @@ through the running UI. Running all baseline command tests also requires Node.js
 
 `runtime/requirements.in` is generated from the reviewed upstream core, proxy,
 extra-proxy and bedrock-realtime dependency lists, excluding the two locally
-built packages.
+built packages. From upstream's `proxy-runtime` extra it takes only the pinned
+`opentelemetry-api`, `opentelemetry-sdk` and `opentelemetry-exporter-otlp`
+(HTTP and gRPC exporters), so the `otel` and `langfuse_otel` callbacks load.
+The Langfuse SDK and the other `proxy-runtime` packages are not included.
 After dependency changes, regenerate and review the lock:
 
 ```sh

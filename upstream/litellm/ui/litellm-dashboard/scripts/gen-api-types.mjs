@@ -27,12 +27,14 @@ const subscriptions = process.argv.includes("--subscriptions");
 const subscriptionBulk = process.argv.includes("--subscription-bulk");
 const subscriptionUsage = process.argv.includes("--subscription-usage");
 const subscriptionLogs = process.argv.includes("--subscription-logs");
+const subscriptionFairUse = process.argv.includes("--subscription-fair-use");
 let outputFile = "schema.d.ts";
 if (personalMcp) outputFile = "personal-mcp-schema.d.ts";
 if (subscriptions) outputFile = "subscriptions-schema.d.ts";
 if (subscriptionLogs) outputFile = "subscription-logs-schema.d.ts";
 if (subscriptionBulk) outputFile = "subscription-bulk-schema.d.ts";
 if (subscriptionUsage) outputFile = "subscription-usage-schema.d.ts";
+if (subscriptionFairUse) outputFile = "subscription-fair-use-schema.d.ts";
 if (oidcLinks) outputFile = "oidc-links-schema.d.ts";
 if (oidcSettings) outputFile = "oidc-settings-schema.d.ts";
 const outPath = join(dashboardDir, "src", "lib", "http", outputFile);
@@ -69,98 +71,101 @@ if (oidcLinks || oidcSettings) {
     "spec = {'openapi': '3.1.0', 'info': {'title': 'Independent OIDC', 'version': '1'}, 'paths': {}, 'components': {'schemas': schemas}}",
     "with open(sys.argv[1], 'w') as f: json.dump(normalize(spec), f, sort_keys=True)",
   ].join("\n");
-} else if (subscriptionUsage || subscriptionBulk) {
+} else if (subscriptionUsage || subscriptionBulk || subscriptionFairUse) {
+  let routerModule = "observed_usage";
+  if (subscriptionBulk) routerModule = "bulk_assignment";
+  if (subscriptionFairUse) routerModule = "fair_use_api";
   dumpSpec = [
     "import json, os, sys, tempfile",
     "from fastapi import FastAPI",
     "from litellm.proxy.extensions.chatgpt_subscriptions.accounts import Accounts",
-    subscriptionBulk ? "from litellm.proxy.extensions.chatgpt_subscriptions.bulk_assignment import router" : "from litellm.proxy.extensions.chatgpt_subscriptions.observed_usage import router",
+    `from litellm.proxy.extensions.chatgpt_subscriptions.${routerModule} import router`,
     "with tempfile.TemporaryDirectory() as directory:",
     "    os.environ['CHATGPT_TOKEN_DIR'] = directory",
     "    os.environ['CHATGPT_ACCOUNTS'] = 'default'",
     "    app = FastAPI()",
-    "    app.include_router(router(Accounts(), dependency=lambda: None))",
+    "    app.include_router(router(Accounts(), lambda: None))",
     "    with open(sys.argv[1], 'w') as f: json.dump(app.openapi(), f, sort_keys=True)",
   ].join("\n");
 } else if (subscriptionLogs) {
   dumpSpec = [
-      "import inspect, json, sys",
-      "from fastapi import FastAPI",
-      "from pydantic import TypeAdapter",
-      "from litellm.proxy.spend_tracking.spend_management_endpoints import router",
-      "from litellm.types.proxy.subscription_attribution import SubscriptionAttributionMetadata",
-      "app = FastAPI()",
-      "for route in router.routes:",
-      "    if route.path == '/spend/logs/ui':",
-      "        route.include_in_schema = True",
-      "        app.router.routes.append(route)",
-      "spec = app.openapi()",
-      "metadata = TypeAdapter(SubscriptionAttributionMetadata).json_schema(ref_template='#/components/schemas/{model}')",
-      "spec['components']['schemas'].update(metadata.pop('$defs', {}))",
-      "spec['components']['schemas']['SubscriptionAttributionMetadata'] = metadata",
-      "spec['paths'] = {'/spend/logs/ui': spec['paths']['/spend/logs/ui']}",
-      "schemas = spec['components']['schemas']",
-      "selected = {}",
-      "def collect(node):",
-      "    if isinstance(node, dict):",
-      "        ref = node.get('$ref', '')",
-      "        if ref.startswith('#/components/schemas/'):",
-      "            name = ref.rsplit('/', 1)[-1]",
-      "            if name not in selected:",
-      "                selected[name] = schemas[name]",
-      "                collect(schemas[name])",
-      "        for value in node.values(): collect(value)",
-      "    elif isinstance(node, list):",
-      "        for value in node: collect(value)",
-      "collect(spec['paths'])",
-      "collect({'$ref': '#/components/schemas/SubscriptionAttributionMetadata'})",
-      "spec['components']['schemas'] = selected",
-      "def normalize(node):",
-      "    if isinstance(node, dict): return {k: inspect.cleandoc(v) if k == 'description' and isinstance(v, str) else normalize(v) for k, v in node.items()}",
-      "    if isinstance(node, list): return [normalize(v) for v in node]",
-      "    return node",
-      "with open(sys.argv[1], 'w') as f: json.dump(normalize(spec), f, sort_keys=True)",
-    ].join("\n");
+    "import inspect, json, sys",
+    "from fastapi import FastAPI",
+    "from pydantic import TypeAdapter",
+    "from litellm.proxy.spend_tracking.spend_management_endpoints import router",
+    "from litellm.types.proxy.subscription_attribution import SubscriptionAttributionMetadata",
+    "app = FastAPI()",
+    "for route in router.routes:",
+    "    if route.path == '/spend/logs/ui':",
+    "        route.include_in_schema = True",
+    "        app.router.routes.append(route)",
+    "spec = app.openapi()",
+    "metadata = TypeAdapter(SubscriptionAttributionMetadata).json_schema(ref_template='#/components/schemas/{model}')",
+    "spec['components']['schemas'].update(metadata.pop('$defs', {}))",
+    "spec['components']['schemas']['SubscriptionAttributionMetadata'] = metadata",
+    "spec['paths'] = {'/spend/logs/ui': spec['paths']['/spend/logs/ui']}",
+    "schemas = spec['components']['schemas']",
+    "selected = {}",
+    "def collect(node):",
+    "    if isinstance(node, dict):",
+    "        ref = node.get('$ref', '')",
+    "        if ref.startswith('#/components/schemas/'):",
+    "            name = ref.rsplit('/', 1)[-1]",
+    "            if name not in selected:",
+    "                selected[name] = schemas[name]",
+    "                collect(schemas[name])",
+    "        for value in node.values(): collect(value)",
+    "    elif isinstance(node, list):",
+    "        for value in node: collect(value)",
+    "collect(spec['paths'])",
+    "collect({'$ref': '#/components/schemas/SubscriptionAttributionMetadata'})",
+    "spec['components']['schemas'] = selected",
+    "def normalize(node):",
+    "    if isinstance(node, dict): return {k: inspect.cleandoc(v) if k == 'description' and isinstance(v, str) else normalize(v) for k, v in node.items()}",
+    "    if isinstance(node, list): return [normalize(v) for v in node]",
+    "    return node",
+    "with open(sys.argv[1], 'w') as f: json.dump(normalize(spec), f, sort_keys=True)",
+  ].join("\n");
 } else if (subscriptions) {
   dumpSpec = [
-      "import json, os, sys, tempfile",
-      "from fastapi import FastAPI",
-      "from litellm.proxy.extensions.chatgpt_subscriptions.accounts import Accounts",
-      "from litellm.proxy.extensions.chatgpt_subscriptions.admin import router",
-      "from litellm.proxy.extensions.chatgpt_subscriptions.model_assignment import SubscriptionAssignment",
-      "with tempfile.TemporaryDirectory() as directory:",
-      "    os.environ['CHATGPT_TOKEN_DIR'] = directory",
-      "    os.environ['CHATGPT_ACCOUNTS'] = 'default'",
-      "    app = FastAPI()",
-      "    for part in router(Accounts(), {}, dependency=lambda: None): app.include_router(part)",
-      "    spec = app.openapi()",
-      "    spec['components']['schemas']['SubscriptionAssignment'] = SubscriptionAssignment.model_json_schema()",
-      "    with open(sys.argv[1], 'w') as f: json.dump(spec, f, sort_keys=True)",
-    ].join("\n");
+    "import json, os, sys, tempfile",
+    "from fastapi import FastAPI",
+    "from litellm.proxy.extensions.chatgpt_subscriptions.accounts import Accounts",
+    "from litellm.proxy.extensions.chatgpt_subscriptions.admin import router",
+    "from litellm.proxy.extensions.chatgpt_subscriptions.model_assignment import SubscriptionAssignment",
+    "with tempfile.TemporaryDirectory() as directory:",
+    "    os.environ['CHATGPT_TOKEN_DIR'] = directory",
+    "    os.environ['CHATGPT_ACCOUNTS'] = 'default'",
+    "    app = FastAPI()",
+    "    for part in router(Accounts(), {}, dependency=lambda: None): app.include_router(part)",
+    "    spec = app.openapi()",
+    "    spec['components']['schemas']['SubscriptionAssignment'] = SubscriptionAssignment.model_json_schema()",
+    "    with open(sys.argv[1], 'w') as f: json.dump(spec, f, sort_keys=True)",
+  ].join("\n");
 } else if (personalMcp) {
   dumpSpec = [
-      "import json, sys",
-      "from litellm.proxy._types import MCPOAuthUserCredentialStatus",
-      "spec = {'openapi': '3.1.0', 'info': {'title': 'Personal MCP connection status', 'version': '1'}, 'paths': {}, 'components': {'schemas': {'MCPOAuthUserCredentialStatus': MCPOAuthUserCredentialStatus.model_json_schema()}}}",
-      "with open(sys.argv[1], 'w') as f: json.dump(spec, f, sort_keys=True)",
-    ].join("\n");
+    "import json, sys",
+    "from litellm.proxy._types import MCPOAuthUserCredentialStatus",
+    "spec = {'openapi': '3.1.0', 'info': {'title': 'Personal MCP connection status', 'version': '1'}, 'paths': {}, 'components': {'schemas': {'MCPOAuthUserCredentialStatus': MCPOAuthUserCredentialStatus.model_json_schema()}}}",
+    "with open(sys.argv[1], 'w') as f: json.dump(spec, f, sort_keys=True)",
+  ].join("\n");
 } else {
   dumpSpec = [
-      "import inspect, json, sys",
-      "from litellm.proxy.proxy_server import app",
-      "from fastapi.routing import APIRoute",
-      "for route in app.routes:",
-      "    if isinstance(route, APIRoute):",
-      "        route.include_in_schema = True",
-      "app.openapi_schema = None",
-      "def normalize(node):",
-      "    if isinstance(node, dict):",
-      "        return {k: inspect.cleandoc(v) if k == 'description' and isinstance(v, str) else normalize(v) for k, v in node.items()}",
-      "    if isinstance(node, list):",
-      "        return [normalize(v) for v in node]",
-      "    return node",
-      "with open(sys.argv[1], 'w') as f: json.dump(normalize(app.openapi()), f, sort_keys=True)",
-    ].join("\n");
+    "import inspect, json, sys",
+    "from litellm.proxy.proxy_server import app",
+    "from fastapi.routing import APIRoute",
+    "for route in app.routes:",
+    "    if isinstance(route, APIRoute):",
+    "        route.include_in_schema = True",
+    "app.openapi_schema = None",
+    "def normalize(node):",
+    "    if isinstance(node, dict):",
+    "        return {k: inspect.cleandoc(v) if k == 'description' and isinstance(v, str) else normalize(v) for k, v in node.items()}",
+    "    if isinstance(node, list):",
+    "        return [normalize(v) for v in node]",
+    "    return node",
+    "with open(sys.argv[1], 'w') as f: json.dump(normalize(app.openapi()), f, sort_keys=True)",
+  ].join("\n");
 }
 
 try {
@@ -169,10 +174,14 @@ try {
     stdio: "inherit",
   });
 
-  execFileSync(join(dashboardDir, "node_modules", ".bin", "openapi-typescript"), [specPath, "-o", outPath, ...(oidcSettings ? ["--default-non-nullable", "false"] : [])], {
-    cwd: dashboardDir,
-    stdio: "inherit",
-  });
+  execFileSync(
+    join(dashboardDir, "node_modules", ".bin", "openapi-typescript"),
+    [specPath, "-o", outPath, ...(oidcSettings ? ["--default-non-nullable", "false"] : [])],
+    {
+      cwd: dashboardDir,
+      stdio: "inherit",
+    },
+  );
 } finally {
   rmSync(specDir, { recursive: true, force: true });
 }

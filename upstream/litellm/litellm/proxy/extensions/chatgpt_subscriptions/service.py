@@ -16,7 +16,7 @@ from . import tokens
 USAGE_URL = os.getenv("CHATGPT_USAGE_URL", "https://chatgpt.com/backend-api/wham/usage")
 MODELS_URL = os.getenv("CHATGPT_MODELS_URL", "https://chatgpt.com/backend-api/codex/models")
 # The models endpoint leaves out models that need a newer Codex CLI than this.
-CODEX_CLIENT_VERSION = os.getenv("CHATGPT_CODEX_CLIENT_VERSION", "0.159.2")
+CODEX_CLIENT_VERSION = os.getenv("CHATGPT_CODEX_CLIENT_VERSION", "0.171.0")
 
 
 class MonitoringError(Exception):
@@ -266,7 +266,7 @@ class ModelsService(CachedLookup):
 class UsageService(CachedLookup):
     failure = "ChatGPT quota request failed or timed out."
 
-    async def fetch(self):
+    async def fetch(self, *, codex_only=False):
         token, account = await self.credentials()
         async with httpx.AsyncClient(
             timeout=10, follow_redirects=False, transport=self.transport
@@ -295,4 +295,6 @@ class UsageService(CachedLookup):
             payload = response.json()
         except ValueError:
             raise MonitoringError("Invalid JSON from OpenAI quota endpoint.") from None
+        if codex_only and isinstance(payload, dict):
+            payload = {"rate_limit": payload.get("rate_limit")}
         return normalize(payload, self.account)

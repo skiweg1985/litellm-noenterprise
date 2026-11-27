@@ -12,6 +12,9 @@ project=tomllib.loads((args.source/'pyproject.toml').read_text())['project']
 extras=project['optional-dependencies']
 # bedrock-realtime: Nova Sonic voice sessions need the bidirectional stream SDK.
 deps=project['dependencies'] + extras['proxy'] + extras['extra_proxy'] + extras['bedrock-realtime']
+# OpenTelemetry: the otel and langfuse_otel callbacks need the SDK and OTLP exporters.
+# Take upstream's lockstep pins from proxy-runtime instead of the whole extra.
+deps+=[d for d in extras['proxy-runtime'] if d.startswith(('opentelemetry-api==', 'opentelemetry-sdk==', 'opentelemetry-exporter-otlp=='))]
 deps=[d for d in deps if not d.startswith(('litellm-enterprise', 'litellm-proxy-extras'))]
 deps+=tomllib.loads((args.source/'litellm-proxy-extras/pyproject.toml').read_text())['project']['dependencies']
 args.output.parent.mkdir(parents=True,exist_ok=True)

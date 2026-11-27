@@ -142,6 +142,32 @@ class MonitoringTests(unittest.TestCase):
         with patch.dict(os.environ, {"CHATGPT_MONITORING_API_KEY": ""}):
             self.assertEqual(client.get(path, headers=headers).status_code, 503)
 
+    def test_display_names_address_subscriptions(self):
+        from litellm.proxy.extensions.chatgpt_subscriptions.registry import Registry
+
+        client = self.client(self.service())
+        headers = {"X-Monitoring-Key": "monitor-secret"}
+        registry = Registry(self.tmp.name)
+        registry.rename("default", "infra-1")
+        for path in ("/chatgpt/accounts/infra-1/usage/prtg", "/chatgpt/accounts/default/usage/prtg"):
+            result = client.get(path, headers=headers)
+            self.assertEqual(result.status_code, 200)
+            self.assertNotIn("error", result.json()["prtg"])
+        self.assertEqual(client.get("/chatgpt/accounts/infra-1/usage", headers=headers).status_code, 200)
+        # A retired namesake does not make the name ambiguous; an active one does.
+        other = registry.create("infra-1")
+        records = registry.records()
+        records[other]["retired"] = True
+        registry.write(records)
+        self.assertEqual(client.get("/chatgpt/accounts/infra-1/usage/prtg", headers=headers).status_code, 200)
+        registry.create("infra-1")
+        result = client.get("/chatgpt/accounts/infra-1/usage/prtg", headers=headers)
+        self.assertEqual(result.status_code, 404)
+        self.assertIn("alias", result.json()["prtg"]["text"])
+        retired = client.get(f"/chatgpt/accounts/{other}/usage/prtg", headers=headers).json()["prtg"]
+        self.assertEqual(retired["error"], 1)
+        self.assertIn("retired", retired["text"])
+
     def test_error_contract_no_secrets(self):
         for status in [401, 429, 500, 302]:
             client = self.client(
@@ -333,12 +359,12 @@ class MonitoringTests(unittest.TestCase):
         def handle(req):
             self.calls.append(req)
             self.assertEqual(
-                str(req.url), "https://chatgpt.com/backend-api/codex/models?client_version=0.159.2"
+                str(req.url), "https://chatgpt.com/backend-api/codex/models?client_version=0.171.0"
             )
             self.assertEqual(req.headers["Authorization"], "Bearer secret-access-marker")
             self.assertEqual(req.headers["ChatGPT-Account-ID"], "test-account")
             self.assertEqual(req.headers["originator"], "codex_cli_rs")
-            self.assertEqual(req.headers["version"], "0.159.2")
+            self.assertEqual(req.headers["version"], "0.171.0")
             return httpx.Response(status, json=data if data is not None else models_payload())
 
         return ModelsService(httpx.MockTransport(handle))
