@@ -27,7 +27,7 @@ subscription creation, naming, connection and retirement in the dashboard,
 model creation with fixed subscriptions, ordered reserves or distributed requests,
 optional bulk assignment with a review of each change,
 per-attempt subscription logs, observed usage by subscription and connection revision,
-quota monitoring, provider compatibility fixes,
+quota monitoring, team and user subscription grants with adaptive fair use, provider compatibility fixes,
 parallel streamed tool-call handling, OpenRouter native image generation in the
 Playground, GPT-Live voice sessions on Azure over WebSocket or WebRTC with client delegation,
 continuous speech translation with Azure Realtime Translate,

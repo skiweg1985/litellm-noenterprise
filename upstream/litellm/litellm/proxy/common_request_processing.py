@@ -1899,6 +1899,8 @@ class ProxyBaseLLMRequestProcessing:
             "x-litellm-timeout": str(timeout) if timeout is not None else None,
             **{k: str(v) for k, v in kwargs.items()},
         }
+        from litellm.proxy.extensions.chatgpt_subscriptions.fair_use import dispatched_headers
+        headers.update(dispatched_headers(litellm_logging_obj))
         if request_data:
             remaining_tokens_header: Final = get_remaining_tokens_and_requests_from_request_data(request_data)
             headers.update(remaining_tokens_header)

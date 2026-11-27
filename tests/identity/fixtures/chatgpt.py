@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 
 app = FastAPI()
-state = {"identity": "seat-a", "catalog_error": False, "catalog_delay": 0, "status": 200, "seen": [], "statuses": [], "stream_error": False, "stream_error_at": 3, "delay": 0, "status_by_identity": {}, "retry_after_by_identity": {}, "models_by_identity": {}, "active": 0, "peak_active": 0, "requests": []}
+state = {"identity": "seat-a", "catalog_error": False, "catalog_delay": 0, "status": 200, "seen": [], "statuses": [], "stream_error": False, "stream_error_at": 3, "delay": 0, "status_by_identity": {}, "retry_after_by_identity": {}, "models_by_identity": {}, "quota_by_identity": {}, "active": 0, "peak_active": 0, "requests": []}
 codes = {}
 fixtures = json.loads((Path(__file__).parents[2] / "deployment_patches/fixtures/chatgpt_sse.json").read_text())
 
@@ -23,7 +23,7 @@ def jwt(identity):
 @app.post('/control')
 async def control(request: Request):
     changes = await request.json()
-    for key in ('identity', 'catalog_error', 'catalog_delay', 'status', 'statuses', 'stream_error', 'stream_error_at', 'delay', 'status_by_identity', 'retry_after_by_identity', 'models_by_identity'):
+    for key in ('identity', 'catalog_error', 'catalog_delay', 'status', 'statuses', 'stream_error', 'stream_error_at', 'delay', 'status_by_identity', 'retry_after_by_identity', 'models_by_identity', 'quota_by_identity'):
         if key in changes:
             state[key] = changes[key]
     if changes.get('clear'):
@@ -67,7 +67,10 @@ async def models(request: Request):
     return {"models": [{"slug": slug, "display_name": "Synthetic GPT", "visibility": "list", "priority": 1, "context_window": 272000, "supported_reasoning_levels": []} for slug in slugs]}
 
 @app.get('/usage')
-async def usage():
+async def usage(request: Request):
+    window = state["quota_by_identity"].get(request.headers.get("chatgpt-account-id"))
+    if window is not None:
+        return {"rate_limit": window}
     return {"rate_limit": {"allowed": True, "primary_window": {"used_percent": 20, "limit_window_seconds": 18000, "reset_at": time.time()+3600}}}
 
 @app.post('/responses')

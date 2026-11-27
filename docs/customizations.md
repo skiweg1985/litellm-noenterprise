@@ -152,6 +152,28 @@ ordered reserves, distribution, bulk assignment, per-attempt attribution,
 observed usage and quota monitoring. Shared types are in
 `types/proxy/subscription_attribution.py`.
 
+Issue #48 adds account grants and adaptive fair use. In the subscription package,
+`settings.py` and `registry.py` validate and persist version 2 policies.
+`access.py` resolves identities and team memberships. `fair_use_math.py`,
+`fair_use.py` and `counters.py` evaluate quota windows and rebuild measured
+usage. `enforcement.py` filters deployments and checks dispatch.
+`fair_use_api.py` serves management and personal status. The existing
+`admin.py`, `expansion.py`, `policy.py`, `attribution.py`, `routes.py` and
+`service.py` supply selector resolution, routing, completion events and refresh.
+
+Fair-use hooks in LiteLLM:
+
+- `router.py`, `router_utils/cooldown_handlers.py`,
+  `router_utils/fallback_event_handlers.py` and `utils.py` end retries and
+  fallbacks for policy denials and preserve deployment health.
+- `proxy/route_llm_request.py` binds the authenticated caller and checks config
+  groups. `llms/custom_httpx/llm_http_handler.py` checks the dispatched credential.
+- `proxy/common_request_processing.py` supplies response headers.
+  `proxy/proxy_server.py` filters model listings and management detail.
+- `proxy/auth/oidc_identity.py` and `proxy/_types.py` admit the personal status
+  route. `proxy/management_helpers/audit_logs.py` supports enabled registry
+  audit records on this distribution.
+
 Hooks in upstream files:
 
 - Routing: `router.py`, `proxy/route_llm_request.py`,

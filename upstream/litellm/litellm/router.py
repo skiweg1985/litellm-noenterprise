@@ -4021,8 +4021,9 @@ class Router:
             raise e
         except Exception as e:
             verbose_router_logger.info("litellm.acompletion(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            if model_name is not None:
-                self.fail_calls[model_name] += 1
+            if getattr(e, "subscription_policy_denial", False):
+                raise
+            self._count_failed_call(model_name, e)
             # Set per-deployment num_retries on exception for retry logic
             if deployment is not None:
                 self._set_deployment_num_retries_on_exception(e, deployment)
@@ -4052,6 +4053,10 @@ class Router:
         kwargs.setdefault(metadata_variable_name, {}).update(
             {"model_group": model, "model_group_alias": model_group_alias}
         )
+
+    def _count_failed_call(self, model: str | None, error: Exception) -> None:
+        if model is not None and not getattr(error, "subscription_policy_denial", False):
+            self.fail_calls[model] += 1
 
     def _set_deployment_num_retries_on_exception(self, exception: Exception, deployment: dict) -> None:
         """
@@ -4814,8 +4819,7 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.image_generation(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            if model_name is not None:
-                self.fail_calls[model_name] += 1
+            self._count_failed_call(model_name, e)
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -4877,8 +4881,7 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.aimage_generation(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            if model_name is not None:
-                self.fail_calls[model_name] += 1
+            self._count_failed_call(model_name, e)
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -4960,8 +4963,7 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.atranscription(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            if model_name is not None:
-                self.fail_calls[model_name] += 1
+            self._count_failed_call(model_name, e)
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -5053,8 +5055,7 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.aspeech(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            if model_name is not None:
-                self.fail_calls[model_name] += 1
+            self._count_failed_call(model_name, e)
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -5112,8 +5113,7 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.arerank(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            if model_name is not None:
-                self.fail_calls[model_name] += 1
+            self._count_failed_call(model_name, e)
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -5227,8 +5227,7 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.atext_completion(model=%s)\x1b[31m Exception %s\x1b[0m", model, e)
-            if model is not None:
-                self.fail_calls[model] += 1
+            self._count_failed_call(model, e)
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -5297,8 +5296,7 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.aadapter_completion(model=%s)\x1b[31m Exception %s\x1b[0m", model, e)
-            if model is not None:
-                self.fail_calls[model] += 1
+            self._count_failed_call(model, e)
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -5499,7 +5497,7 @@ class Router:
                     specific_deployment=kwargs.pop("specific_deployment", None),
                 )
             except Exception as e:
-                if passthrough_on_no_deployment:
+                if passthrough_on_no_deployment and not getattr(e, "subscription_policy_denial", False):
                     return await original_generic_function(model=model, **kwargs)
                 raise e
 
@@ -5553,11 +5551,12 @@ class Router:
 
             return response
         except Exception as e:
+            if getattr(e, "subscription_policy_denial", False):
+                raise
             verbose_router_logger.info(
                 "ageneric_api_call_with_fallbacks(model=%s)\x1b[31m Exception %s\x1b[0m", model, e
             )
-            if model is not None:
-                self.fail_calls[model] += 1
+            self._count_failed_call(model, e)
             if deployment is not None:
                 self._set_deployment_num_retries_on_exception(e, deployment)
                 self._stamp_failed_deployment_id_with_effective_model_info(e, deployment, kwargs)
@@ -6217,8 +6216,7 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("%s(model=%s)\x1b[31m Exception %s\x1b[0m", handler_name, model, e)
-            if model is not None:
-                self.fail_calls[model] += 1
+            self._count_failed_call(model, e)
             raise e
 
     def embedding(
@@ -6283,8 +6281,7 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.embedding(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            if model_name is not None:
-                self.fail_calls[model_name] += 1
+            self._count_failed_call(model_name, e)
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -6349,8 +6346,7 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.aembedding(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            if model_name is not None:
-                self.fail_calls[model_name] += 1
+            self._count_failed_call(model_name, e)
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -6495,8 +6491,7 @@ class Router:
             verbose_router_logger.exception(
                 "litellm.acreate_file(model=%s, %s)\x1b[31m Exception %s\x1b[0m", model, kwargs, e
             )
-            if model is not None:
-                self.fail_calls[model] += 1
+            self._count_failed_call(model, e)
             raise e
 
     #### VECTOR STORES API ####
@@ -6574,8 +6569,7 @@ class Router:
             verbose_router_logger.exception(
                 "litellm.avector_store_create(model=%s)\x1b[31m Exception %s\x1b[0m", model, e
             )
-            if model is not None:
-                self.fail_calls[model] += 1
+            self._count_failed_call(model, e)
             raise e
 
     def _override_vector_store_methods_for_router(self):
@@ -6669,8 +6663,7 @@ class Router:
             verbose_router_logger.exception(
                 "litellm._acreate_batch(model=%s, %s)\x1b[31m Exception %s\x1b[0m", model, kwargs, e
             )
-            if model is not None:
-                self.fail_calls[model] += 1
+            self._count_failed_call(model, e)
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -6874,8 +6867,7 @@ class Router:
             verbose_router_logger.exception(
                 "litellm._acancel_batch(model=%s, %s)\x1b[31m Exception %s\x1b[0m", model, kwargs, e
             )
-            if model is not None:
-                self.fail_calls[model] += 1
+            self._count_failed_call(model, e)
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -7660,6 +7652,8 @@ class Router:
         hop_depth: Final = kwargs.get("fallback_depth")
         nested_fallback_hop: Final = isinstance(hop_depth, int) and hop_depth > 0
 
+        if getattr(e, "subscription_policy_denial", False):
+            raise e
         if disable_fallbacks is True or original_model_group is None or is_guardrail_intervention(e):
             raise e
 
@@ -7874,6 +7868,8 @@ class Router:
 
                 return response
         except Exception as new_exception:
+            if getattr(new_exception, "subscription_policy_denial", False):
+                raise
             parent_otel_span: Final = get_parent_otel_span_from_kwargs(kwargs)
             fallback_failure_exception_str = truncate_fallback_error_detail(redact_string(str(new_exception)))
             cooldown_info: Final = await async_get_cooldown_deployments_with_debug_info(
@@ -8081,7 +8077,7 @@ class Router:
             response = add_retry_headers_to_response(response=response, attempted_retries=0, max_retries=None)
             return response
         except Exception as e:
-            if is_guardrail_intervention(e):
+            if is_guardrail_intervention(e) or getattr(e, "subscription_policy_denial", False):
                 raise
             current_attempt = None
             original_exception = e
@@ -8181,6 +8177,8 @@ class Router:
                     return response
 
                 except Exception as e:
+                    if getattr(e, "subscription_policy_denial", False):
+                        raise
                     # Always track the latest error so we raise the most
                     # recent exception instead of the first one.
                     original_exception = e
@@ -8637,6 +8635,8 @@ class Router:
         try:
             exception: Final = kwargs.get("exception", None)
 
+            if getattr(exception, "subscription_policy_denial", False):
+                return False
             if is_advisor_orchestration_failure(exception):
                 verbose_router_logger.debug(
                     "Router: Exiting 'deployment_callback_on_failure' without cooldown. "
@@ -8736,6 +8736,8 @@ class Router:
         """
         Update RPM usage for a deployment
         """
+        if getattr(kwargs.get("exception"), "subscription_policy_denial", False):
+            return
         if is_batch_retrieve_call_type(kwargs.get("call_type")):
             return
         deployment_name: Final = kwargs["litellm_params"]["metadata"].get(

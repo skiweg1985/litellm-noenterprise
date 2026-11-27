@@ -578,7 +578,8 @@ def is_personal_mcp_route(path: str, method: str) -> bool:
 def authorize_browser_route(request: Request, role: str) -> None:
     from litellm.proxy.auth.auth_utils import get_request_route
 
-    personal = is_personal_mcp_route(get_request_route(request), request.method)
+    path = get_request_route(request).rstrip("/")
+    personal = is_personal_mcp_route(path, request.method) or (path == "/chatgpt/fair-use/me" and request.method == "GET")
     if role not in ("proxy_admin", "proxy_admin_viewer") and not personal:
         raise HTTPException(403, "This session has personal MCP access, not administration access")
     if role == "proxy_admin_viewer" and request.method not in ("GET", "HEAD", "OPTIONS") and not personal:

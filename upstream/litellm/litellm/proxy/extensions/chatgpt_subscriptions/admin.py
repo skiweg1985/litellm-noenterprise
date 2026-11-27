@@ -78,6 +78,18 @@ NO_SUBSCRIPTION = "no_subscription"
 UNKNOWN_SUBSCRIPTION = "unknown_subscription"
 
 
+def deployment_selector(params, credential_values):
+    credential = params.get("litellm_credential_name")
+    key = params.get("api_key")
+    if key is None and credential:
+        values = credential_values(credential)
+        if values is None:
+            return None, CREDENTIAL_MISSING
+        key = values.get("api_key")
+    account = tokens.account_for_api_key(key)
+    return account, NO_SUBSCRIPTION if account is None else None
+
+
 def resolve_deployments(model_list, credential_values, known, subscription_accounts=None):
     """ChatGPT deployments with model name, id, credential and subscription.
 
@@ -104,17 +116,8 @@ def resolve_deployments(model_list, credential_values, known, subscription_accou
                 })
             continue
         credential = params.get("litellm_credential_name") or None
-        api_key, problem = params.get("api_key"), None
-        if api_key is None and credential:
-            values = credential_values(credential)
-            if values is None:
-                problem = CREDENTIAL_MISSING
-            else:
-                api_key = values.get("api_key")
-        account = tokens.account_for_api_key(api_key)
-        if problem is None and account is None:
-            problem = NO_SUBSCRIPTION
-        elif problem is None and account not in known:
+        account, problem = deployment_selector(params, credential_values)
+        if problem is None and account not in known:
             problem = UNKNOWN_SUBSCRIPTION
         found.append({
             "model_name": deployment.get("model_name"),

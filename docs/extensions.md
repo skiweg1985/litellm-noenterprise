@@ -151,6 +151,73 @@ requests may use. The same editor also offers a fixed account or an ordered
 preferred account with reserves; distribution ignores list order. Cross-member
 attempts in distribution are recorded as retries rather than reserve switches.
 
+## Grant subscriptions to teams and users
+
+Proxy administrators can read or replace grants with
+`GET` or `PUT /chatgpt/api/accounts/{name}/access`. The body contains
+LiteLLM team and user IDs, for example `{"teams":["engineering"],"users":[]}`.
+Two empty lists allow everyone. A user grant or the key's team grant allows
+access. A key without a team uses the user's current team memberships.
+Directory lookups are cached for 60 seconds. Unknown IDs stay in the registry
+and appear in admin status. Retired accounts have read-only settings.
+
+Inference and the model catalog apply grants to every caller, including proxy
+admins. Admin model management shows the full inventory. Fixed, priority,
+distribution and configuration-backed groups select from permitted members.
+For a mixed configuration group the router filters deployments for each request,
+including selectors stored in named credentials. The transport checks the selected
+subscription again before sending. A model without a permitted member returns
+HTTP 403 with error type `subscription_access_denied`.
+
+## Fair use
+
+The proxy checks each connected subscription's Codex quota every
+`CHATGPT_FAIR_USE_REFRESH_SECONDS` (default 60), independently of monitoring.
+Fair use defaults to enabled. The primary window becomes scarce at 60% used
+and the weekly window at 80%. Read or replace these settings with
+`GET` or `PUT /chatgpt/api/accounts/{name}/fair-use`. The fields are
+`enabled`, `primary_threshold` and `secondary_threshold`. Thresholds accept
+integers from 1 through 100. The first registry write upgrades version 1
+and preserves account IDs, grants and connection history.
+
+Each window starts at its reset time minus its duration. A user's share is
+their fraction of observed input and output tokens multiplied by the provider's
+used percentage. Their allowance is 100 times their factor divided by the sum
+of active users' factors. An attempt without usage counts toward activity
+with zero tokens. Both calculations include the current caller. A user without
+a user ID is counted under `key:` followed by the key hash.
+
+Use `GET` or `PUT /chatgpt/api/fair-use/factors` with a body such as
+`{"teams":{"engineering":2},"users":{}}`. Factors range from 0 through 10.
+A user factor takes precedence over the highest applicable team factor.
+The default is 1. For other active users the calculation uses the team of
+their latest attempt in that window. A factor of 0 exempts the user and
+excludes them from the allowance denominator. A single active user is exempt.
+
+When a window is scarce and the caller has reached their allowance, routing
+skips that subscription. If every permitted member is throttled, the proxy
+returns HTTP 429 with type `fair_use_limit` and `Retry-After` in seconds to
+the earliest blocking reset. Policy denials end routing without a deployment
+failure or cooldown. Missing or invalid windows, expired windows and readings
+older than three refresh intervals allow the request through the fair-use check.
+
+Successful responses with current quota carry `x-litellm-fair-use-share`,
+`x-litellm-fair-use-allowance` and `x-litellm-fair-use-reset`. They describe
+the dispatched account at admission, using the window with the smallest gap
+between allowance and share. Streams include them in the initial HTTP headers.
+
+`GET /chatgpt/fair-use/me` shows the authenticated caller's usage on permitted
+subscriptions. `GET /chatgpt/api/fair-use/status` shows quota freshness, users,
+thresholds and unknown grant or factor IDs to administrators. Policy updates
+write before and after settings to the proxy audit log when enabled.
+
+Counters use the proxy's coordination Redis when configured and process memory
+otherwise. On first use and window rollover the proxy rebuilds counts from
+retained spend logs, then adds live attempts once per attempt ID. Window
+membership uses the attempt start or, for older records, the request start.
+Without a database the rebuild uses only live attempts available in the cache. Multi-worker installations
+need shared Redis for live counters.
+
 ## Find subscription requests
 
 In **Logs**, the Subscription column shows the name recorded when each request

@@ -29,6 +29,8 @@ class CredentialSnapshot:
 @dataclass
 class Attempt:
     value: SubscriptionAttemptRecord
+    user: str | None = None
+    team: str | None = None
 
     def finish(self, outcome, response=None, error=None):
         if self.value.get("ended_at") is not None:
@@ -52,6 +54,9 @@ class Attempt:
         code = getattr(error, "status_code", None)
         if isinstance(code, int):
             self.value["error_code"] = str(code)
+        if self.user:
+            from .counters import counters, event
+            counters.record(self.value["subscription_id"], event(self.value, self.user, self.team))
 
 
 @dataclass
@@ -116,7 +121,9 @@ def begin(logging_obj, credential, model):
         "input_tokens": None,
         "output_tokens": None,
     }
-    attempt = Attempt(value)
+    from .access import Caller
+    caller = Caller.from_request({**params, "litellm_logging_obj": logging_obj})
+    attempt = Attempt(value, caller.identity, caller.team)
     state.attempts.append(attempt)
     return attempt
 
