@@ -107,6 +107,16 @@ dispatch. Membership changes, deletion and rename therefore cannot make a stale
 worker send to a removed member. The public parent ID remains the ordinary model
 log filter; each attempt also records its stable member deployment ID.
 
+A subscription model can be the target of a `model_group_alias` or a member of a
+routing group. The router hands out such members under the alias or group name;
+the currency check accepts that name as long as it still routes to the saved
+model, so a renamed or deleted model is still rejected. Inside a routing group the
+member's eligible subscriptions take the member's place and priority, and the
+group's strategy and order fallback choose between all members. If access or fair
+use excludes every subscription of the member, the group continues with its other
+members; only when no member remains does the caller receive the 403 or 429. The
+reserve retry budget applies when the subscription model is called directly.
+
 After connecting an account, **Assign to models** opens an optional review of
 existing ChatGPT models. Compatible reserve models append the account last;
 distribution models add it to their membership. Deselect any model to leave it

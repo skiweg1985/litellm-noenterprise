@@ -22,7 +22,8 @@ async def retry_policy(router, model, kwargs):
     )
     parents = [parents] if isinstance(parents, dict) else parents
     managed = [p for p in parents if (p.get("model_info") or {}).get(ASSIGNMENT)]
-    if len(managed) != 1 or managed[0]["model_info"][ASSIGNMENT].get("mode") == "fixed":
+    # A routing group keeps native retries and order fallback across its members.
+    if len(parents) != 1 or len(managed) != 1 or managed[0]["model_info"][ASSIGNMENT].get("mode") == "fixed":
         return None
     parent = await current_parent(managed[0])
     assignment = SubscriptionAssignment.model_validate(parent["model_info"][ASSIGNMENT])
