@@ -250,6 +250,7 @@ class LitellmTableNames(str, enum.Enum):
     Enum for Table Names used by LiteLLM
     """
 
+    SUBSCRIPTION_REGISTRY = "ChatGPT_SubscriptionRegistry"
     TEAM_TABLE_NAME = "LiteLLM_TeamTable"
     USER_TABLE_NAME = "LiteLLM_UserTable"
     KEY_TABLE_NAME = "LiteLLM_VerificationToken"
@@ -686,6 +687,7 @@ class LiteLLMRoutes(enum.Enum):
         + model_info_routes
     )
     info_routes = [
+        "/chatgpt/fair-use/me",
         "/key/info",
         "/key/health",
         "/team/info",

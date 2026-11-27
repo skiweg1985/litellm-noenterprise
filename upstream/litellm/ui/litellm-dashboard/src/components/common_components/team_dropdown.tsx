@@ -13,6 +13,7 @@ interface TeamDropdownProps {
   organizationId?: string | null;
   pageSize?: number;
   id?: string;
+  showId?: boolean;
   filterTeam?: (team: Team) => boolean;
 }
 
@@ -24,6 +25,7 @@ const TeamDropdown: React.FC<TeamDropdownProps> = ({
   organizationId,
   pageSize = 20,
   id,
+  showId = true,
   filterTeam,
 }) => {
   const [search, setSearch] = useState("");
@@ -86,7 +88,7 @@ const TeamDropdown: React.FC<TeamDropdownProps> = ({
         options={eligibleTeams.map((team) => ({
           label: team.team_alias || team.team_id,
           value: team.team_id,
-          sublabel: team.team_id,
+          sublabel: showId ? team.team_id : undefined,
         }))}
         value={value}
         onValueChange={handleChange}

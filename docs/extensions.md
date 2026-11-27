@@ -151,6 +151,101 @@ requests may use. The same editor also offers a fixed account or an ordered
 preferred account with reserves; distribution ignores list order. Cross-member
 attempts in distribution are recorded as retries rather than reserve switches.
 
+## Grant subscriptions to teams and users
+
+Proxy administrators can read or replace grants with
+`GET` or `PUT /chatgpt/api/accounts/{name}/access`. The body contains
+LiteLLM team and user IDs, for example `{"teams":["engineering"],"users":[]}`.
+Two empty lists allow everyone. A user grant or the key's team grant allows
+access. A key without a team uses the user's current team memberships.
+On each subscription card, **Edit access** selects teams and users, and **Edit fair use**
+sets the 5-hour and weekly thresholds or turns fair use off.
+Directory lookups are cached for 60 seconds. Unknown IDs stay in the registry
+and appear in admin status. Retired accounts have read-only settings.
+
+Inference and the model catalog apply grants to every caller, including proxy
+admins. Admin model management shows the full inventory. Fixed, priority,
+distribution and configuration-backed groups select from permitted members.
+For a mixed configuration group the router filters deployments for each request,
+including selectors stored in named credentials. The transport checks the selected
+subscription again before sending. A model without a permitted member returns
+HTTP 403 with error type `subscription_access_denied`.
+
+## Fair use
+
+The proxy checks each connected subscription's Codex quota every
+`CHATGPT_FAIR_USE_REFRESH_SECONDS` (default 60), independently of monitoring.
+Fair use defaults to enabled. The primary window becomes scarce at 60% used
+and the secondary window at 80%. Plans assign windows differently: most report
+a 5-hour primary and a weekly secondary window, while some business plans
+report only a weekly primary window. Fair use evaluates the windows a plan
+reports, and the status and error messages name each window by its duration.
+Read or replace these settings with
+`GET` or `PUT /chatgpt/api/accounts/{name}/fair-use`. The fields are
+`enabled`, `primary_threshold` and `secondary_threshold`. Thresholds accept
+integers from 1 through 100. Back up `CHATGPT_TOKEN_DIR` (registry and tokens)
+before upgrading. The first registry write saves version 2, which images
+without this feature cannot read. Restore the backup to roll back.
+
+Each window starts at its reset time minus its duration. A user's share is
+their fraction of price-weighted consumption multiplied by the provider's
+used percentage. Each attempt weights uncached input, cached input and output
+at the upstream model's LiteLLM rates. Missing cache counts or rates use the
+input rate. Status reports both raw tokens and consumption in fair-use units.
+Consumption is independent of spend.
+
+Administrators can read or replace overrides with
+`GET` or `PUT /chatgpt/api/fair-use/model-weights`. Use upstream model IDs.
+Set `like` to inherit another model's effective rates (one level), `factor`
+to scale the reference rates (0–100), or `input` and `output` with optional
+`cache_read` to set per-token rates. Changes apply to the whole current window.
+Unpriced models use the list rates of `CHATGPT_FAIR_USE_REFERENCE_MODEL`
+(default `gpt-6-sol`) and are flagged in model-weight status. If the reference
+has no usable price, status reports `reference_fallback` and the proxy uses
+2e-6 for input, 1e-5 for output and 2e-7 for cache reads.
+
+A user's allowance is 100 times their factor divided by the sum
+of active users' factors. An attempt without usage counts toward activity
+with zero tokens. Both calculations include the current caller. A user without
+a user ID is counted under `key:` followed by the key hash.
+
+Use `GET` or `PUT /chatgpt/api/fair-use/factors` with a body such as
+`{"teams":{"engineering":2},"users":{}}`. Factors range from 0 through 10.
+A user factor takes precedence over the highest applicable team factor.
+The default is 1. For other active users the calculation uses the team of
+their latest attempt in that window. A factor of 0 exempts the user and
+excludes them from the allowance denominator. A single active user is exempt.
+
+When a window is scarce and the caller has reached their allowance, routing
+skips that subscription. If every permitted member is throttled, the proxy
+returns HTTP 429 with type `fair_use_limit` and `Retry-After` in seconds to
+the earliest blocking reset. Policy denials end routing without a deployment
+failure or cooldown. A reading without any window, an invalid window, an
+expired window and a reading older than three refresh intervals allow the
+request through the fair-use check.
+
+Successful responses with current quota carry `x-litellm-fair-use-share`,
+`x-litellm-fair-use-allowance` and `x-litellm-fair-use-reset`. They describe
+the dispatched account at admission, using the window with the smallest gap
+between allowance and share. Streams include them in the initial HTTP headers.
+
+`GET /chatgpt/fair-use/me` shows the authenticated caller's usage on permitted
+subscriptions. `GET /chatgpt/api/fair-use/status` shows quota freshness, users,
+thresholds and unknown grant or factor IDs to administrators. Policy updates
+write before and after settings to the proxy audit log when enabled.
+
+Open **Fair use** beside **Observed usage** to review limits and reset times, change
+team or user factors, and edit model weights. Any signed-in user can open
+**My subscription usage** to see their own shares, allowances and reset times
+for permitted subscriptions.
+
+Counters use the proxy's coordination Redis when configured and process memory
+otherwise. On first use and window rollover the proxy rebuilds counts from
+retained spend logs, then adds live attempts once per attempt ID. Window
+membership uses the attempt start or, for older records, the request start.
+Without a database the rebuild uses only live attempts available in the cache. Multi-worker installations
+need shared Redis for live counters.
+
 ## Find subscription requests
 
 In **Logs**, the Subscription column shows the name recorded when each request
@@ -208,7 +303,10 @@ backend Python environment used for the other scoped contracts.
 Monitoring is disabled unless `CHATGPT_MONITORING_API_KEY` is configured.
 Requests use `X-Monitoring-Key`; this key does not grant administration access.
 
-- `GET /chatgpt/accounts`: redacted status and quota overview.
+- `GET /chatgpt/accounts`: redacted status and quota overview. Each row has
+  the alias (`account`), `display_name` and `subscription_id`, the id that
+  spend logs record in `subscription_attempts`. It omits email addresses and
+  provider account ids.
 - `GET /chatgpt/accounts/{name}/usage`: account quota data.
 - `GET /chatgpt/accounts/{name}/usage/prtg`: generic PRTG channel response.
 
@@ -257,7 +355,10 @@ runs and hands that work to the client. Clients connect to
 a public model in the first event:
 
 ```json
-{"type": "session.start", "session": {"model": "gpt-live-1", "instructions": "Answer briefly."}}
+{
+  "type": "session.start",
+  "session": { "model": "gpt-live-1", "instructions": "Answer briefly." }
+}
 ```
 
 Add the model like any Azure model: `azure/<deployment>` with the resource's
@@ -285,7 +386,11 @@ ordinary request through the proxy, for example `/v1/responses` with any model
 and its tools, and returns the result:
 
 ```json
-{"type": "session.commentary.append", "delegation_id": "<delegation.id>", "content": "It is about 8 pm in Tokyo."}
+{
+  "type": "session.commentary.append",
+  "delegation_id": "<delegation.id>",
+  "content": "It is about 8 pm in Tokyo."
+}
 ```
 
 `session.thinking.append` with the same ID adds quiet progress context. The
@@ -452,7 +557,12 @@ Errors from the proxy itself have their own shape, so they cannot be mistaken
 for a Bedrock event:
 
 ```json
-{"error": {"type": "invalid_request_error", "message": "Event usageEvent is not supported."}}
+{
+  "error": {
+    "type": "invalid_request_error",
+    "message": "Event usageEvent is not supported."
+  }
+}
 ```
 
 An unsupported event or tool configuration is answered this way and dropped;

@@ -63,6 +63,8 @@ def cooldown_seconds(router, parent, error):
 
 async def record_failure(router, kwargs, error):
     """Skip failed members for this request; retain native shared cooldown state."""
+    if getattr(error, "subscription_policy_denial", False):
+        return False
     logging_obj = kwargs.get("litellm_logging_obj")
     selection = getattr(logging_obj, "_subscription_selection", None)
     from .attribution import snapshot

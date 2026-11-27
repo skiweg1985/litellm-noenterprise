@@ -266,7 +266,7 @@ class ModelsService(CachedLookup):
 class UsageService(CachedLookup):
     failure = "ChatGPT quota request failed or timed out."
 
-    async def fetch(self):
+    async def fetch(self, *, codex_only=False):
         token, account = await self.credentials()
         async with httpx.AsyncClient(
             timeout=10, follow_redirects=False, transport=self.transport
@@ -295,4 +295,6 @@ class UsageService(CachedLookup):
             payload = response.json()
         except ValueError:
             raise MonitoringError("Invalid JSON from OpenAI quota endpoint.") from None
+        if codex_only and isinstance(payload, dict):
+            payload = {"rate_limit": payload.get("rate_limit")}
         return normalize(payload, self.account)

@@ -11990,7 +11990,8 @@ async def model_list(
         llm_router=llm_router,
     )
 
-    hidden_names: Final = blocked_names | unhealthy_names
+    from litellm.proxy.extensions.chatgpt_subscriptions.enforcement import hidden_models
+    hidden_names: Final = blocked_names | unhealthy_names | await hidden_models(llm_router, user_api_key_dict)
 
     # If scope=expand and user has admin privileges, return all proxy models
     if should_expand_scope:
@@ -12200,7 +12201,8 @@ async def model_info(
         general_settings=settings,
         llm_router=llm_router,
     )
-    hidden_names: Final = blocked_names | unhealthy_names
+    from litellm.proxy.extensions.chatgpt_subscriptions.enforcement import hidden_models
+    hidden_names: Final = blocked_names | unhealthy_names | await hidden_models(llm_router, user_api_key_dict)
     internal_to_public: Final = TeamModelNameTranslator.build_internal_to_public_map(llm_router, settings)
     callback_hidden_names: Final = await _names_hidden_by_listing_callbacks(
         user_api_key_dict,
@@ -12622,7 +12624,8 @@ async def completion(
             message=getattr(e, "message", error_msg),
             type=getattr(e, "type", "None"),
             param=getattr(e, "param", "None"),
-            headers=litellm_call_id_headers(litellm_call_id),
+            headers={**(litellm_call_id_headers(litellm_call_id) or {}), **(getattr(e, "headers", {}) or {})}
+            if getattr(e, "subscription_policy_denial", False) else litellm_call_id_headers(litellm_call_id),
             openai_code=getattr(e, "code", None),
             code=getattr(e, "status_code", 500),
         )
@@ -16167,6 +16170,9 @@ async def model_info_v2(
             all_models=all_models,
         )
 
+    from litellm.proxy.extensions.chatgpt_subscriptions.enforcement import visible_deployments
+    all_models = await visible_deployments(all_models, user_api_key_dict, management=True)
+
     # Fill in model info based on config.yaml and litellm model_prices_and_context_window.json
     # This must happen before teamId filtering so that direct_access and access_via_team_ids are populated
     for i, _model in enumerate(all_models):
@@ -16878,10 +16884,13 @@ async def model_info_v1(
             detail={"error": CommonProxyErrors.db_not_connected_error.value},
         )
 
+    from litellm.proxy.extensions.chatgpt_subscriptions.enforcement import visible_deployments
     if litellm_model_id is not None:
         # user is trying to get specific model from litellm router
         deployment_info: Final = llm_router.get_deployment(model_id=litellm_model_id)
-        if deployment_info is None or await _deployment_hidden_by_listing_callbacks(deployment_info, user_api_key_dict):
+        if (deployment_info is None
+                or not await visible_deployments([deployment_info.model_dump()], user_api_key_dict, management=True)
+                or await _deployment_hidden_by_listing_callbacks(deployment_info, user_api_key_dict)):
             raise HTTPException(
                 status_code=400,
                 detail={"error": f"Model id = {litellm_model_id} not found on litellm proxy"},
@@ -16914,6 +16923,7 @@ async def model_info_v1(
     all_models: list[dict] = copy.deepcopy(llm_router.model_list)
     alias_models: Final = copy.deepcopy(llm_router.get_model_list_from_model_alias())
     all_models.extend(alias_models)
+    all_models = await visible_deployments(all_models, user_api_key_dict, management=True)
 
     all_models = expand_wildcard_deployments_for_model_info(all_models)
 

@@ -1433,6 +1433,8 @@ def _get_wrapper_num_retries(kwargs: dict[str, Any], exception: Exception) -> tu
     Used for the wrapper functions.
     """
 
+    if getattr(exception, "subscription_policy_denial", False):
+        return 0, kwargs
     num_retries = kwargs.get("num_retries", None)
     if num_retries is None:
         num_retries = litellm.num_retries

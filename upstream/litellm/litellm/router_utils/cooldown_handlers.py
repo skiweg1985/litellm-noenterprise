@@ -449,6 +449,8 @@ def set_cooldown_deployments(
     - True if the deployment should be put in cooldown
     - False if the deployment should not be put in cooldown
     """
+    if getattr(original_exception, "subscription_policy_denial", False):
+        return False
     verbose_router_logger.debug("checks 'should_run_cooldown_logic'")
 
     if (

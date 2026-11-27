@@ -130,6 +130,8 @@ class Selection:
 
 def record_selection(deployment, logging_obj):
     member = (deployment.get("model_info") or {}).get(MEMBER)
+    if getattr(logging_obj, "_subscription_fair_use_headers", None):
+        logging_obj._subscription_fair_use_headers = {}
     if not member or logging_obj is None:
         return
     logging_obj._subscription_selection = Selection(
@@ -179,7 +181,9 @@ async def expand_candidates(router, candidates, request_kwargs=None):
     parents = [candidates] if isinstance(candidates, dict) else candidates
     managed = [p for p in parents if (p.get("model_info") or {}).get(ASSIGNMENT)]
     if not managed:
-        return candidates
+        from .enforcement import filter_config
+
+        return await filter_config(candidates, request_kwargs)
     if len(parents) != 1:
         raise unavailable(
             "This subscription model has conflicting deployments. Use a unique public model name."
@@ -214,6 +218,9 @@ async def expand_candidates(router, candidates, request_kwargs=None):
     attempted = {
         a["model_id"] for a in snapshot(logging_obj).get("subscription_attempts", [])
     }
+    from .access import Caller
+    from .enforcement import decisions
+
     result = []
     for index, identifier in enumerate(assignment.subscription_ids):
         account = by_id.get(identifier)
@@ -243,6 +250,13 @@ async def expand_candidates(router, candidates, request_kwargs=None):
         result.append(candidate)
     blocked = await member_cooldowns(router, [d["model_info"]["id"] for d in result])
     result = [d for d in result if d["model_info"]["id"] not in blocked]
+    aliases = [by_id[i].name for i in assignment.subscription_ids if i in by_id]
+    if not aliases:
+        raise unavailable()
+    eligible = [by_id[d["model_info"][MEMBER]["subscription_id"]].name for d in result]
+    allowed = await decisions(await asyncio.to_thread(accounts.registry.read), aliases,
+                              Caller.from_request(request_kwargs), eligible=set(eligible))
+    result = [d for d, alias in zip(result, eligible) if alias in allowed]
     if not result:
         raise unavailable()
     if request_kwargs is not None:

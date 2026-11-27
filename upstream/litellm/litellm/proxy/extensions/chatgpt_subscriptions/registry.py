@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 from . import tokens
+from .settings import Access, Factors, FairUse, ModelWeights
 
 
 class Registry:
@@ -12,18 +13,47 @@ class Registry:
         self.path = self.root / '.subscriptions.json'
         self.lock_path = self.root / '.subscriptions'
 
-    def records(self):
+    def read(self):
         value = tokens.read(self.path)
         if value is None:
             if self.path.exists():
                 raise ValueError('Subscription registry is unreadable.')
-            return {}
-        if value.get('version') != 1 or not isinstance(value.get('accounts'), dict):
+            value = {'version': 2, 'accounts': {}}
+        if type(value.get('version')) is not int or value['version'] not in (1, 2) or not isinstance(value.get('accounts'), dict):
             raise ValueError('Unsupported subscription registry.')
-        return value['accounts']
+        try:
+            for record in value['accounts'].values():
+                record['access'] = Access.model_validate(record.get('access', {})).model_dump()
+                record['fair_use'] = FairUse.model_validate(record.get('fair_use', {})).model_dump()
+            value['fair_use_factors'] = Factors.model_validate(value.get('fair_use_factors', {})).model_dump()
+            value['model_weights'] = ModelWeights.model_validate(value.get('model_weights', {})).model_dump()
+        except (ValueError, AttributeError, TypeError):
+            raise ValueError('Invalid subscription settings.') from None
+        value['version'] = 2
+        return value
+
+    def records(self):
+        return self.read()['accounts']
 
     def write(self, records):
-        tokens.write({'version': 1, 'accounts': records}, self.path)
+        # All writers hold lock_path. Preserve unrelated settings on lifecycle writes.
+        value = self.read()
+        value['accounts'] = records
+        tokens.write(value, self.path)
+
+    def update_settings(self, field, body, alias=None):
+        model = {'access': Access, 'fair_use': FairUse, 'fair_use_factors': Factors,
+                 'model_weights': ModelWeights}[field]
+        saved = model.model_validate(body).model_dump()
+        with tokens.locked(self.lock_path):
+            value = self.read()
+            target = value if field in ('fair_use_factors', 'model_weights') else value['accounts'][alias]
+            if target.get('retired'):
+                raise ValueError('Retired subscriptions cannot be changed.')
+            previous = target[field]
+            target[field] = saved
+            tokens.write(value, self.path)
+        return previous, saved
 
     def seed(self, names):
         with tokens.locked(self.lock_path):
@@ -40,7 +70,8 @@ class Registry:
     @staticmethod
     def entry(display_name):
         return {'subscription_id': str(uuid.uuid4()), 'display_name': display_name,
-                'retired': False, 'created_at': time.time()}
+                'retired': False, 'created_at': time.time(),
+                'access': Access().model_dump(), 'fair_use': FairUse().model_dump()}
 
     @staticmethod
     def validate_name(display_name):

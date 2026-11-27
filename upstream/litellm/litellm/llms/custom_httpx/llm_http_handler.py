@@ -2717,6 +2717,11 @@ class BaseLLMHTTPHandler:
             },
         )
 
+        if custom_llm_provider == "chatgpt":
+            from litellm.litellm_core_utils.asyncify import run_async_function
+            from litellm.proxy.extensions.chatgpt_subscriptions.enforcement import dispatch
+            run_async_function(dispatch, logging_obj, getattr(litellm_params, "_chatgpt_credential_snapshot", None))
+
         from litellm.proxy.extensions.chatgpt_subscriptions.attribution import begin as begin_subscription_attempt
         subscription_attempt = begin_subscription_attempt(
             logging_obj, getattr(litellm_params, "_chatgpt_credential_snapshot", None), model
@@ -2934,6 +2939,9 @@ class BaseLLMHTTPHandler:
 
         from litellm.proxy.extensions.chatgpt_subscriptions.expansion import assert_dispatch_current
         await assert_dispatch_current(logging_obj)
+        if custom_llm_provider == "chatgpt":
+            from litellm.proxy.extensions.chatgpt_subscriptions.enforcement import dispatch
+            await dispatch(logging_obj, getattr(litellm_params, "_chatgpt_credential_snapshot", None))
 
         from litellm.proxy.extensions.chatgpt_subscriptions.attribution import begin as begin_subscription_attempt
         subscription_attempt = begin_subscription_attempt(

@@ -12,6 +12,7 @@ export const pageDescriptions: Record<string, string> = {
   agents: "Create and manage AI agents",
   agentic: "Manage agentic resources: agents, workflow runs, and memory",
   workflows: "Track and inspect durable workflow run history",
+  "my-subscription-usage": "View your subscription shares, allowances and reset times",
   "chatgpt-subscriptions": "Manage ChatGPT subscription accounts, sign-in and quotas",
   "mcp-servers": "Configure Model Context Protocol servers",
   memory: "Inspect and manage agent memory entries stored under /v1/memory",

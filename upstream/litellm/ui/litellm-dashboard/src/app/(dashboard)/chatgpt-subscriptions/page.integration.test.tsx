@@ -77,8 +77,60 @@ function mount() {
   );
 }
 
+const policyPut = vi.fn();
+function stubSettings() {
+  let access = { teams: [] as string[], users: ["removed"] };
+  let policy = { enabled: true, primary_threshold: 60, secondary_threshold: 80 };
+  policyPut.mockClear();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(input instanceof Request ? input.url : String(input), "http://localhost").pathname;
+      if (init?.method === "PUT") {
+        const body = JSON.parse(String(init.body));
+        policyPut(path, body);
+        if (path.endsWith("/access")) access = body;
+        else policy = body;
+      }
+      switch (path) {
+        case "/chatgpt/api/accounts/primary/access":
+          return Response.json(access);
+        case "/chatgpt/api/accounts/primary/fair-use":
+          return Response.json(policy);
+        case "/chatgpt/api/fair-use/status":
+          return Response.json({
+            accounts: [
+              {
+                account: "primary",
+                display_name: "primary",
+                enabled: policy.enabled,
+                access,
+                unknown_ids: { users: ["removed"] },
+                windows: [
+                  { id: "primary", name: "5-hour", threshold: policy.primary_threshold },
+                  { id: "secondary", name: "weekly", threshold: policy.secondary_threshold },
+                ],
+              },
+            ],
+          });
+        case "/user/list":
+          return Response.json({
+            users: [{ user_id: "alex", user_email: "alex@example.test" }],
+            page: 1,
+            total_pages: 1,
+          });
+        case "/v2/team/list":
+          return Response.json({ teams: [{ team_id: "eng", team_alias: "Engineering" }], page: 1, total_pages: 1 });
+        default:
+          throw new Error("Unexpected request " + path);
+      }
+    }),
+  );
+}
+
 describe("ChatGPT subscription management", () => {
   beforeEach(() => {
+    stubSettings();
     auth.userRole = "proxy_admin";
     auth.isAuthorized = true;
     auth.isLoading = false;
@@ -89,7 +141,40 @@ describe("ChatGPT subscription management", () => {
   });
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     clients.splice(0).forEach((client) => client.clear());
+  });
+
+  it("adds named teams and users and removes unknown grants", async () => {
+    const actor = userEvent.setup();
+    mount();
+    await actor.click(await screen.findByRole("button", { name: "Edit access" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Edit access" }));
+    await actor.click(await dialog.findByRole("button", { name: "Remove Unknown user · removed" }));
+    expect(dialog.getByText("Everyone")).toBeVisible();
+    await actor.click(dialog.getByRole("combobox", { name: "Add team" }));
+    await actor.click(await screen.findByRole("option", { name: "Engineering" }));
+    await actor.click(dialog.getByRole("combobox", { name: "Add user" }));
+    await actor.click(await screen.findByRole("option", { name: "alex@example.test" }));
+    await actor.click(dialog.getByRole("button", { name: "Save access" }));
+    expect(await screen.findByText("1 team · 1 user")).toBeVisible();
+    expect(policyPut).toHaveBeenCalledWith("/chatgpt/api/accounts/primary/access", { teams: ["eng"], users: ["alex"] });
+  });
+
+  it("saves the switch and both fair-use thresholds", async () => {
+    const actor = userEvent.setup();
+    mount();
+    await actor.click(await screen.findByRole("button", { name: "Edit fair use" }));
+    await actor.click(await screen.findByRole("switch", { name: "Enable fair use" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "5-hour window (%)" }), { target: { value: "55" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Weekly window (%)" }), { target: { value: "90" } });
+    await actor.click(screen.getByRole("button", { name: "Save fair use" }));
+    expect(await screen.findByText("Off · limits from 55% (5-hour), 90% (weekly)")).toBeVisible();
+    expect(policyPut).toHaveBeenCalledWith("/chatgpt/api/accounts/primary/fair-use", {
+      enabled: false,
+      primary_threshold: 55,
+      secondary_threshold: 90,
+    });
   });
 
   it("offers an optional model review after connection without automatically saving assignments", async () => {

@@ -29,6 +29,8 @@ class CredentialSnapshot:
 @dataclass
 class Attempt:
     value: SubscriptionAttemptRecord
+    user: str | None = None
+    team: str | None = None
 
     def finish(self, outcome, response=None, error=None):
         if self.value.get("ended_at") is not None:
@@ -37,7 +39,8 @@ class Attempt:
         if isinstance(response, dict):
             usage = response.get("usage")
         if usage is not None and hasattr(usage, "model_dump"):
-            usage = usage.model_dump()
+            # A Responses usage object defaults an omitted cached_tokens field to zero.
+            usage = usage.model_dump(exclude_unset=True)
         self.value.update(outcome=outcome, ended_at=now())
         if isinstance(usage, dict):
             for target, keys in [
@@ -49,9 +52,18 @@ class Attempt:
                     None,
                 )
                 self.value[target] = value if value is not None and value >= 0 else None
+            for key in ("input_tokens_details", "prompt_tokens_details"):
+                details = usage.get(key)
+                cached = details.get("cached_tokens") if isinstance(details, dict) else None
+                if type(cached) is int and cached >= 0:
+                    self.value["cached_input_tokens"] = cached
+                    break
         code = getattr(error, "status_code", None)
         if isinstance(code, int):
             self.value["error_code"] = str(code)
+        if self.user:
+            from .counters import counters, event
+            counters.record(self.value["subscription_id"], event(self.value, self.user, self.team))
 
 
 @dataclass
@@ -115,8 +127,11 @@ def begin(logging_obj, credential, model):
         "reserve_switch": routing_mode == "priority" and reason == "fallback",
         "input_tokens": None,
         "output_tokens": None,
+        "cached_input_tokens": None,
     }
-    attempt = Attempt(value)
+    from .access import Caller
+    caller = Caller.from_request({**params, "litellm_logging_obj": logging_obj})
+    attempt = Attempt(value, caller.identity, caller.team)
     state.attempts.append(attempt)
     return attempt
 

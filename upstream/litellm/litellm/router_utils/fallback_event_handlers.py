@@ -799,6 +799,8 @@ async def run_async_fallback(
             )
             return response
         except Exception as e:
+            if getattr(e, "subscription_policy_denial", False):
+                raise
             error_from_fallbacks = e
             fallback_errors = fallback_errors + (get_fallback_error_info(e),)
             await log_failure_fallback_event(
