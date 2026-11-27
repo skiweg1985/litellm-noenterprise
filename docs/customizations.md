@@ -151,6 +151,8 @@ registry and lifecycle, device sign-in, token storage, fixed assignment,
 ordered reserves, distribution, bulk assignment, per-attempt attribution,
 observed usage and quota monitoring. Shared types are in
 `types/proxy/subscription_attribution.py`.
+The model catalog request reports Codex CLI 0.171.0, so the catalog lists
+GPT-6.2 (`service.py`, override with `CHATGPT_CODEX_CLIENT_VERSION`).
 
 Hooks in upstream files:
 
