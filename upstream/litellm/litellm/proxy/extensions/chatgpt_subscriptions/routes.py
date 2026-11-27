@@ -17,6 +17,7 @@ from .service import ModelsService, MonitoringError, UsageService
 OVERVIEW = "/chatgpt/accounts"
 PREFIX = OVERVIEW + "/{name}/usage"
 UNKNOWN = "Unknown ChatGPT account."
+AMBIGUOUS = "Several ChatGPT subscriptions use this name. Use the subscription alias."
 PATHS = (OVERVIEW, PREFIX, PREFIX + "/prtg", admin.PAGE, admin.API, observed_usage.API)
 # Fields of an account that the monitoring key may see: no email and no provider
 # account ids. subscription_id is the proxy's own id, also recorded in spend logs.
@@ -28,6 +29,23 @@ def configuration_text(found):
     names = ", ".join(sorted({p["deployment"] or p["id"] or "?" for p in found}))
     return (f"Configuration: {len(found)} ChatGPT deployment(s) without a valid "
             f"subscription ({names}). Requests to them fail. See /chatgpt/ui")
+
+
+def find_account(accounts, name):
+    """The subscription with this alias, or the one active subscription with this display name.
+
+    Dashboard-created subscriptions have generated aliases, so monitoring
+    sensors may address them by their display name instead.
+    """
+    account = accounts.get(name)
+    if account is not None:
+        return account, None
+    records = accounts.registry.records() if accounts.registry is not None else {}
+    matches = [alias for alias, record in records.items()
+               if record.get("display_name") == name and not record.get("retired")]
+    if len(matches) == 1:
+        return accounts.get(matches[0]), None
+    return None, AMBIGUOUS if matches else UNKNOWN
 
 
 def require_key(x_monitoring_key: str = Header(default="")):
@@ -101,11 +119,12 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
 
     @router.get(PREFIX)
     async def usage(name: str):
-        account = accounts.get(name)
+        account, missing = find_account(accounts, name)
         if account is None:
-            return JSONResponse({"error": UNKNOWN}, status_code=404, headers={"Cache-Control": "no-store"})
+            return JSONResponse({"error": missing}, status_code=404, headers={"Cache-Control": "no-store"})
         if account.retired():
             raise HTTPException(409, "Subscription is retired.")
+        name = account.name
         services.setdefault(name, UsageService(account=name, path=account.path, transport=account.transport))
         try:
             result = await services[name].get()
@@ -123,16 +142,19 @@ def register(app, accounts=None, services=None, admin_dependency=None, watch=Tru
         limit_id: str = Query(default="codex", max_length=128),
         windows: str = Query(default="primary,secondary", max_length=32),
     ):
-        account = accounts.get(name)
+        account, missing = find_account(accounts, name)
         if account is None:
-            return JSONResponse({"prtg": {"error": 1, "text": UNKNOWN}}, status_code=404,
+            return JSONResponse({"prtg": {"error": 1, "text": missing}}, status_code=404,
                                 headers={"Cache-Control": "no-store"})
+        name = account.name
         services.setdefault(name, UsageService(account=name, path=account.path, transport=account.transport))
         status = account.status()
         broken = admin.problems(await admin.deployment_snapshot(deployments))
         # Alarm when requests fail now or once the token expires, and while a
         # sign-in with a different account waits for an admin.
-        if broken:
+        if account.retired():
+            result = {"prtg": {"error": 1, "text": "Subscription is retired. Remove this sensor or point it to another subscription."}}
+        elif broken:
             result = {"prtg": {"error": 1, "text": configuration_text(broken)}}
         elif status["pending_account"]:
             result = {"prtg": {"error": 1, "text": (

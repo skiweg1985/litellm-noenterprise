@@ -323,6 +323,13 @@ Requests use `X-Monitoring-Key`; this key does not grant administration access.
 - `GET /chatgpt/accounts/{name}/usage`: account quota data.
 - `GET /chatgpt/accounts/{name}/usage/prtg`: generic PRTG channel response.
 
+`{name}` is the subscription alias or the display name of exactly one active
+subscription. Dashboard-created subscriptions have generated aliases such as
+`sub_<hex>`, so sensors can use the display name; renaming the subscription
+then changes the sensor URL. Plans that report only a weekly window need
+`windows=primary`. A sensor for a retired subscription reports an error that
+names the retirement.
+
 Monitoring timestamps default to UTC; `CHATGPT_MONITORING_TIMEZONE` selects an
 IANA timezone. Monitoring responses omit device authorization codes.
 
