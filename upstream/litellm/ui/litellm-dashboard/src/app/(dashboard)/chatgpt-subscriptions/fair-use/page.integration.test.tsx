@@ -57,8 +57,16 @@ beforeEach(() => {
                 enabled: true,
                 quota_state: "current",
                 windows: [
-                  { ...windowInfo, id: "primary" },
-                  { ...windowInfo, id: "secondary", threshold: 80, users: [], scarce: false, used_percent: 2 },
+                  { ...windowInfo, id: "primary", name: "5-hour" },
+                  {
+                    ...windowInfo,
+                    id: "secondary",
+                    name: "weekly",
+                    threshold: 80,
+                    users: [],
+                    scarce: false,
+                    used_percent: 2,
+                  },
                 ],
               },
               {

@@ -161,7 +161,7 @@ class FairUseApiTests(unittest.TestCase):
         self.assertNotIn("other-private-user", response.text)
         self.assertNotIn("subscription_id", response.text)
         for w in body["accounts"][0]["windows"]:
-            self.assertEqual(set(w), {"id", "scarce", "threshold", "used_percent", "reset_at", "tokens",
+            self.assertEqual(set(w), {"id", "name", "scarce", "threshold", "used_percent", "reset_at", "tokens",
                                       "consumption", "factor", "share", "allowance", "throttled"})
             self.assertEqual(w["tokens"], 4)
             consumption = 2 * 2e-6 + 2e-7 + 1e-5

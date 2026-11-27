@@ -9,13 +9,23 @@ def _number(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
+def active_windows(snapshot):
+    """Window ids the plan reports. Some plans only report a weekly primary window."""
+    if not isinstance(snapshot, dict):
+        return ()
+    return tuple(name for name in WINDOWS if snapshot.get(name) is not None)
+
+
 def quota_state(snapshot, now, interval):
     if not isinstance(snapshot, dict) or not _number(snapshot.get("fetched_at")):
         return "unavailable"
     if snapshot["fetched_at"] > now:
         return "unavailable"
-    for name in WINDOWS:
-        window = snapshot.get(name)
+    names = active_windows(snapshot)
+    if not names:
+        return "unavailable"
+    for name in names:
+        window = snapshot[name]
         if not isinstance(window, dict):
             return "unavailable"
         used, duration, reset = (window.get(k) for k in ("used_percent", "window_seconds", "reset_at"))
@@ -26,7 +36,7 @@ def quota_state(snapshot, now, interval):
         # Bound reset to a representable UTC timestamp for response headers.
         if reset >= 253402300799:
             return "unavailable"
-    if now - snapshot["fetched_at"] > 3 * interval or any(snapshot[k]["reset_at"] <= now for k in WINDOWS):
+    if now - snapshot["fetched_at"] > 3 * interval or any(snapshot[k]["reset_at"] <= now for k in names):
         return "stale"
     return "current"
 
@@ -51,7 +61,15 @@ def utc(timestamp):
     return datetime.fromtimestamp(timestamp, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def window_name(window):
-    if window["id"] == "secondary":
+def window_name(window_id, seconds):
+    """Name a window by its duration, because plans assign the ids differently."""
+    if not _number(seconds) or seconds <= 0:
+        return "weekly" if window_id == "secondary" else "5-hour"
+    if abs(seconds - 18000) <= 60:
+        return "5-hour"
+    if abs(seconds - 604800) <= 60:
         return "weekly"
-    return "5-hour" if abs(window["window_seconds"] - 18000) <= 60 else "short"
+    days = round(seconds / 86400)
+    if days and abs(seconds - days * 86400) <= 60:
+        return f"{days}-day"
+    return f"{max(1, round(seconds / 3600))}-hour"

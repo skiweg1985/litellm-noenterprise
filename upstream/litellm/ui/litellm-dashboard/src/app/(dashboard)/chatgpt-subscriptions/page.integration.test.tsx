@@ -107,8 +107,8 @@ function stubSettings() {
                 access,
                 unknown_ids: { users: ["removed"] },
                 windows: [
-                  { id: "primary", threshold: policy.primary_threshold },
-                  { id: "secondary", threshold: policy.secondary_threshold },
+                  { id: "primary", name: "5-hour", threshold: policy.primary_threshold },
+                  { id: "secondary", name: "weekly", threshold: policy.secondary_threshold },
                 ],
               },
             ],

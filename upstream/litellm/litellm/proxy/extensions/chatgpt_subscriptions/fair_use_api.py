@@ -17,7 +17,7 @@ from .admin import API, NO_STORE, litellm_admin
 from .counters import counters
 from .enforcement import is_chatgpt
 from .fair_use import evaluate, quotas
-from .fair_use_math import WINDOWS, quota_state
+from .fair_use_math import active_windows, quota_state
 from .fair_use_weights import ModelPricing, model_id
 from .settings import Access, Factors, FairUse, ModelWeights
 
@@ -37,6 +37,7 @@ class ActiveUser(UserShare):
 
 class WindowInfo(BaseModel):
     id: Literal["primary", "secondary"]
+    name: str
     used_percent: float | None
     threshold: int
     scarce: bool
@@ -105,7 +106,7 @@ async def model_weights_status(overrides):
     for account, snapshot in list(quotas.snapshots.items()):
         if quota_state(snapshot, now, quotas.interval) == "unavailable":
             continue
-        for name in WINDOWS:
+        for name in active_windows(snapshot):
             # An older quota reading still identifies the window until its reset.
             if snapshot[name]["reset_at"] > now:
                 users = await counters.counts(account, name, snapshot[name])

@@ -77,6 +77,24 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(enforcement.SubscriptionAccessDenied):
             await expand_candidates(self.router, [self.parent("distribution")], self.data)
 
+    async def test_plan_with_only_a_weekly_primary_window(self):
+        for alias in ["b", "c"]:
+            self.registry.update_settings("access", {"users": ["other"]}, alias)
+        fair_use.quotas.snapshots[self.ids["a"]] = {
+            "fetched_at": self.now, "secondary": None,
+            "primary": dict(used_percent=70, window_seconds=604800, reset_at=self.now + 300),
+        }
+        for user, count in (("heavy", 90), ("light", 10)):
+            self.store.record(self.ids["a"], [user, self.now, user, None, "test", [count, 0, 0], True])
+        with self.assertRaises(enforcement.FairUseLimitExceeded) as caught:
+            await expand_candidates(self.router, [self.parent("priority")], self.data)
+        self.assertIn("The weekly fair-use limit", caught.exception.message)
+        light = {"metadata": {"user_api_key_user_id": "light"}}
+        self.assertEqual(len(await expand_candidates(self.router, [self.parent("priority")], light)), 1)
+        logger = SimpleNamespace(model_call_details={"litellm_params": light})
+        await enforcement.dispatch(logger, CredentialSnapshot(self.ids["a"], "A", None))
+        self.assertEqual(fair_use.dispatched_headers(logger)["x-litellm-fair-use-allowance"], "50.0")
+
     async def test_config_precheck_candidates_and_actual_dispatch(self):
         from litellm.proxy.route_llm_request import _raise_if_model_fully_blocked
 
@@ -176,7 +194,7 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
         router = litellm.Router(model_list=[{"model_name": "test", "litellm_params": {"model": "openai/gpt-4o", "api_key": "synthetic"}}],
                                 num_retries=4, fallbacks=[{"test": ["backup"]}])
         self.addCleanup(router.discard)
-        rate = enforcement.FairUseLimitExceeded([(dict(id="primary", window_seconds=18000, reset_at=self.now + 60), "Seat")])
+        rate = enforcement.FairUseLimitExceeded([(dict(id="primary", name="5-hour", window_seconds=18000, reset_at=self.now + 60), "Seat")])
         for error, code, kind in [(rate, 429, "fair_use_limit"), (enforcement.SubscriptionAccessDenied(), 403, "subscription_access_denied")]:
             attempt = AsyncMock(side_effect=error)
             with self.assertRaises(type(error)):

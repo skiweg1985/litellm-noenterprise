@@ -165,6 +165,8 @@ export interface components {
              * @enum {string}
              */
             id: "primary" | "secondary";
+            /** Name */
+            name: string;
             /** Reset At */
             reset_at: number | null;
             /** Scarce */
@@ -299,6 +301,8 @@ export interface components {
              * @enum {string}
              */
             id: "primary" | "secondary";
+            /** Name */
+            name: string;
             /** Reset At */
             reset_at: number | null;
             /** Scarce */

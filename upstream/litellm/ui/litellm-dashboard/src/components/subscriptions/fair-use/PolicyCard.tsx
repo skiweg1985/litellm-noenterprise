@@ -15,7 +15,7 @@ import {
   saveFairUse,
 } from "@/lib/http/subscriptionFairUse";
 import { fairUseKey, type Session, useSaveSetting, useDirectoryNames } from "./queries";
-import { shortWindowNames } from "./presentation";
+import { windowTitle } from "./presentation";
 
 type PolicyProps = { session: Session; account: AdminAccount };
 const groups = ["teams", "users"] as const;
@@ -97,6 +97,8 @@ function FairUseEditor({ account, session, initial, close }: PolicyProps & { ini
   const [enabled, setEnabled] = useState(initial.enabled);
   const [primary, setPrimary] = useState(String(initial.primary_threshold));
   const [secondary, setSecondary] = useState(String(initial.secondary_threshold));
+  // Plans report one or two windows; a window the plan does not report keeps its stored threshold.
+  const titles = Object.fromEntries(account.windows.map((window) => [window.id, windowTitle(window)]));
   const save = useSaveSetting(
     session,
     [account.account, "fair-use"],
@@ -117,28 +119,32 @@ function FairUseEditor({ account, session, initial, close }: PolicyProps & { ini
         </label>
         <fieldset className="grid gap-3 sm:grid-cols-2">
           <legend className="mb-1 font-medium">Start limiting at</legend>
-          <label>
-            5-hour window (%)
-            <Input
-              type="number"
-              min={1}
-              max={100}
-              required
-              value={primary}
-              onChange={(event) => setPrimary(event.target.value)}
-            />
-          </label>
-          <label>
-            Weekly window (%)
-            <Input
-              type="number"
-              min={1}
-              max={100}
-              required
-              value={secondary}
-              onChange={(event) => setSecondary(event.target.value)}
-            />
-          </label>
+          {titles.primary && (
+            <label>
+              {titles.primary} (%)
+              <Input
+                type="number"
+                min={1}
+                max={100}
+                required
+                value={primary}
+                onChange={(event) => setPrimary(event.target.value)}
+              />
+            </label>
+          )}
+          {titles.secondary && (
+            <label>
+              {titles.secondary} (%)
+              <Input
+                type="number"
+                min={1}
+                max={100}
+                required
+                value={secondary}
+                onChange={(event) => setSecondary(event.target.value)}
+              />
+            </label>
+          )}
         </fieldset>
         {save.isError && <p role="alert">Could not save fair use. Try again.</p>}
         <Button type="submit">Save fair use</Button>
@@ -241,7 +247,7 @@ export function PolicyCard({ account, session, retired }: PolicyProps & { retire
         <p>
           {account.enabled ? "On" : "Off"}
           {" · limits from "}
-          {account.windows.map((window) => window.threshold + "% (" + shortWindowNames[window.id] + ")").join(", ")}
+          {account.windows.map((window) => window.threshold + "% (" + window.name + ")").join(", ")}
         </p>
         {!retired && (
           <Button size="sm" variant="outline" onClick={() => setEditing("fair-use")}>

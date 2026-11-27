@@ -176,7 +176,11 @@ HTTP 403 with error type `subscription_access_denied`.
 The proxy checks each connected subscription's Codex quota every
 `CHATGPT_FAIR_USE_REFRESH_SECONDS` (default 60), independently of monitoring.
 Fair use defaults to enabled. The primary window becomes scarce at 60% used
-and the weekly window at 80%. Read or replace these settings with
+and the secondary window at 80%. Plans assign windows differently: most report
+a 5-hour primary and a weekly secondary window, while some business plans
+report only a weekly primary window. Fair use evaluates the windows a plan
+reports, and the status and error messages name each window by its duration.
+Read or replace these settings with
 `GET` or `PUT /chatgpt/api/accounts/{name}/fair-use`. The fields are
 `enabled`, `primary_threshold` and `secondary_threshold`. Thresholds accept
 integers from 1 through 100. Back up `CHATGPT_TOKEN_DIR` (registry and tokens)
@@ -216,8 +220,9 @@ When a window is scarce and the caller has reached their allowance, routing
 skips that subscription. If every permitted member is throttled, the proxy
 returns HTTP 429 with type `fair_use_limit` and `Retry-After` in seconds to
 the earliest blocking reset. Policy denials end routing without a deployment
-failure or cooldown. Missing or invalid windows, expired windows and readings
-older than three refresh intervals allow the request through the fair-use check.
+failure or cooldown. A reading without any window, an invalid window, an
+expired window and a reading older than three refresh intervals allow the
+request through the fair-use check.
 
 Successful responses with current quota carry `x-litellm-fair-use-share`,
 `x-litellm-fair-use-allowance` and `x-litellm-fair-use-reset`. They describe

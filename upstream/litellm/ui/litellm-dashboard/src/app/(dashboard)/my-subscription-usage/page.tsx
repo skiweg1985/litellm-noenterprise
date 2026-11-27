@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
 import { getMySubscriptionUsage, type PersonalAccount } from "@/lib/http/subscriptionFairUse";
-import { policyNotice, windowNames, localReset, percent } from "@/components/subscriptions/fair-use/presentation";
+import { policyNotice, windowTitle, localReset, percent } from "@/components/subscriptions/fair-use/presentation";
 import { fairUseKey, polling, type Session } from "@/components/subscriptions/fair-use/queries";
 
 function PersonalUsage({ account }: { account: PersonalAccount }) {
@@ -24,8 +24,8 @@ function PersonalUsage({ account }: { account: PersonalAccount }) {
             {account.windows.map((window) => {
               const reset = localReset(window.reset_at);
               return (
-                <section aria-label={windowNames[window.id]} className="min-w-0 space-y-2" key={window.id}>
-                  <h3 className="font-semibold">{windowNames[window.id]}</h3>
+                <section aria-label={windowTitle(window)} className="min-w-0 space-y-2" key={window.id}>
+                  <h3 className="font-semibold">{windowTitle(window)}</h3>
                   <p>
                     Your share: {percent(window.share)} · Your allowance:{" "}
                     {window.factor === 0 ? "Exempt" : percent(window.allowance)}

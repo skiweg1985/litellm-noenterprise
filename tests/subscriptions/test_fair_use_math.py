@@ -39,15 +39,29 @@ class FairUseMathTests(unittest.TestCase):
         self.assertEqual(math.quota_state(snapshot, 1180, 60), "current")
         self.assertEqual(math.quota_state(snapshot, 1181, 60), "stale")
         self.assertEqual(math.quota_state(snapshot, 2000, 600), "stale")
-        for quota in [None, {}, ["invalid"], {**snapshot, "secondary": None}, {**snapshot, "fetched_at": float("nan")}]:
+        for quota in [None, {}, ["invalid"], {**snapshot, "secondary": ["invalid"]},
+                      {**snapshot, "primary": None, "secondary": None}, {**snapshot, "fetched_at": float("nan")}]:
             self.assertEqual(math.quota_state(quota, 1000, 60), "unavailable")
         for field, value in [("used_percent", float("nan")), ("used_percent", 101), ("window_seconds", True),
                              ("reset_at", float("inf")), ("window_seconds", -1)]:
             invalid = {**snapshot, "primary": {**window, field: value}}
             self.assertEqual(math.quota_state(invalid, 1000, 60), "unavailable")
 
+    def test_plan_with_only_a_weekly_primary_window(self):
+        weekly = dict(used_percent=2, window_seconds=604800, reset_at=600000)
+        snapshot = dict(fetched_at=1000, primary=weekly, secondary=None)
+        self.assertEqual(math.active_windows(snapshot), ("primary",))
+        self.assertEqual(math.quota_state(snapshot, 1100, 60), "current")
+        self.assertEqual(math.quota_state({**snapshot, "primary": {**weekly, "reset_at": 1050}}, 1100, 600), "stale")
+        self.assertEqual(math.active_windows(None), ())
+
     def test_window_labels(self):
-        self.assertEqual(math.window_name(dict(id="primary", window_seconds=17999)), "5-hour")
-        self.assertEqual(math.window_name(dict(id="primary", window_seconds=300)), "short")
-        self.assertEqual(math.window_name(dict(id="secondary", window_seconds=604800)), "weekly")
+        self.assertEqual(math.window_name("primary", 17999), "5-hour")
+        self.assertEqual(math.window_name("primary", 604800), "weekly")
+        self.assertEqual(math.window_name("secondary", 604800), "weekly")
+        self.assertEqual(math.window_name("primary", 259200), "3-day")
+        self.assertEqual(math.window_name("primary", 300), "1-hour")
+        self.assertEqual(math.window_name("primary", 7200), "2-hour")
+        self.assertEqual(math.window_name("primary", None), "5-hour")
+        self.assertEqual(math.window_name("secondary", None), "weekly")
         self.assertEqual(math.utc(3600), "1970-01-01T01:00:00Z")

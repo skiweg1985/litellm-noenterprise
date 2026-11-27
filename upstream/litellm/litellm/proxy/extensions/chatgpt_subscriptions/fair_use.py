@@ -7,7 +7,7 @@ import litellm
 from .access import Caller, Grants
 from .accounts import _env_seconds
 from .counters import counters
-from .fair_use_math import WINDOWS, quota_state, utc, window_users
+from .fair_use_math import WINDOWS, active_windows, quota_state, utc, window_name, window_users
 from .fair_use_weights import ModelPricing
 from .service import UsageService
 
@@ -39,8 +39,8 @@ class Quotas:
             previous = self.snapshots.get(identifier) or {}
             self.snapshots[identifier] = snapshot
             if quota_state(snapshot, time.time(), self.interval) == "current":
-                await asyncio.to_thread(counters.trim, identifier, [snapshot[w] for w in WINDOWS])
-                for name in WINDOWS:
+                await asyncio.to_thread(counters.trim, identifier, [snapshot[w] for w in active_windows(snapshot)])
+                for name in active_windows(snapshot):
                     old = previous.get(name)
                     if old and old.get("reset_at") != snapshot[name]["reset_at"]:
                         await counters.counts(identifier, name, snapshot[name])
@@ -69,14 +69,15 @@ async def evaluate(record, factors, overrides, caller=None):
     policy = record["fair_use"]
     snapshot = quotas.snapshots.get(account)
     state = quota_state(snapshot, time.time(), quotas.interval)
-    counts = {name: {} for name in WINDOWS}
+    names = active_windows(snapshot) or WINDOWS
+    counts = {name: {} for name in names}
     if state == "current":
         try:
-            for name in WINDOWS:
+            for name in names:
                 counts[name] = await counters.counts(account, name, snapshot[name])
         except Exception:
             # A partial rebuild cannot supply a fair share. Retry on the next read.
-            counts = {name: {} for name in WINDOWS}
+            counts = {name: {} for name in names}
             state = "unavailable"
 
     contexts = {
@@ -99,7 +100,9 @@ async def evaluate(record, factors, overrides, caller=None):
             measurements.setdefault(caller.identity, (0, 0.0))
             weights[caller.identity] = grants.factor(caller)
         users = window_users(measurements, weights, used, threshold, policy["enabled"])
-        windows.append(dict(id=name, threshold=threshold, used_percent=used, reset_at=quota.get("reset_at"),
+        reported = snapshot.get(name) if isinstance(snapshot, dict) else None
+        seconds = reported.get("window_seconds") if isinstance(reported, dict) else None
+        windows.append(dict(id=name, name=window_name(name, seconds), threshold=threshold, used_percent=used, reset_at=quota.get("reset_at"),
                             window_seconds=quota.get("window_seconds"), scarce=used is not None and used >= threshold,
                             users=users))
     return state, windows

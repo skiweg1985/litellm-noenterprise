@@ -1,7 +1,8 @@
 import type { AdminAccount, ModelWeights } from "@/lib/http/subscriptionFairUse";
 
-export const windowNames = { primary: "5-hour window", secondary: "Weekly window" };
-export const shortWindowNames = { primary: "5-hour", secondary: "weekly" };
+// The server names each window by its duration ("5-hour", "weekly", "3-day").
+export const windowTitle = (window: { name: string }) =>
+  window.name.charAt(0).toUpperCase() + window.name.slice(1) + " window";
 export function policyNotice(account: Pick<AdminAccount, "enabled" | "quota_state">) {
   if (!account.enabled) return "Fair use is off";
   return account.quota_state === "current" ? null : "Fair use paused – quota data unavailable";

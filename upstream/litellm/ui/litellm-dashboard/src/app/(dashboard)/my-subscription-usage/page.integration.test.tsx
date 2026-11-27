@@ -27,6 +27,7 @@ it("shows an internal user their allowance, local limiting reset and paused subs
   const reset = new Date(2026, 9, 1, 14, 30);
   const window = {
     id: "primary",
+    name: "5-hour",
     share: 48,
     allowance: 40,
     factor: 1,
@@ -41,7 +42,7 @@ it("shows an internal user their allowance, local limiting reset and paused subs
           display_name: "Research",
           enabled: true,
           quota_state: "current",
-          windows: [window, { ...window, id: "secondary", share: 8, allowance: 50, throttled: false }],
+          windows: [window, { ...window, id: "secondary", name: "weekly", share: 8, allowance: 50, throttled: false }],
         },
         { display_name: "Offline", enabled: true, quota_state: "stale", windows: [] },
         { display_name: "Sandbox", enabled: false, quota_state: "current", windows: [] },
@@ -70,4 +71,29 @@ it("shows an internal user their allowance, local limiting reset and paused subs
       headers: expect.objectContaining({ Authorization: "Bearer session" }),
     }),
   );
+});
+
+it("names a plan's only window by its duration", async () => {
+  const weekly = {
+    id: "primary",
+    name: "weekly",
+    share: 3,
+    allowance: 50,
+    factor: 1,
+    throttled: false,
+    reset_at: null,
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      Response.json({
+        user_id: "alex",
+        accounts: [{ display_name: "Business", enabled: true, quota_state: "current", windows: [weekly] }],
+      }),
+    ),
+  );
+  renderWithProviders(<Page />);
+  const region = within(await screen.findByRole("region", { name: "Weekly window" }));
+  expect(region.getByText("Your share: 3% · Your allowance: 50%")).toBeVisible();
+  expect(screen.queryByRole("region", { name: "5-hour window" })).not.toBeInTheDocument();
 });

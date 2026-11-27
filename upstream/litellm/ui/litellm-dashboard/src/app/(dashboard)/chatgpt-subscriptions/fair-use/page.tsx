@@ -9,7 +9,7 @@ import { FairUseTable } from "@/components/subscriptions/fair-use/FairUseTable";
 import { FactorsEditor } from "@/components/subscriptions/fair-use/FactorsEditor";
 import { ModelWeightsEditor } from "@/components/subscriptions/fair-use/ModelWeightsEditor";
 import { useDirectoryNames, useFairUseStatus, type Session } from "@/components/subscriptions/fair-use/queries";
-import { policyNotice, windowNames, localReset, percent } from "@/components/subscriptions/fair-use/presentation";
+import { policyNotice, windowTitle, localReset, percent } from "@/components/subscriptions/fair-use/presentation";
 import type { AdminAccount } from "@/lib/http/subscriptionFairUse";
 
 function SubscriptionStatus({ account, names }: { account: AdminAccount; names: Map<string, string> }) {
@@ -26,8 +26,8 @@ function SubscriptionStatus({ account, names }: { account: AdminAccount; names: 
         {account.windows.map((window) => {
           const reset = localReset(window.reset_at);
           return (
-            <section key={window.id} aria-label={windowNames[window.id]} className="min-w-0 space-y-2">
-              <h4 className="font-semibold">{windowNames[window.id]}</h4>
+            <section key={window.id} aria-label={windowTitle(window)} className="min-w-0 space-y-2">
+              <h4 className="font-semibold">{windowTitle(window)}</h4>
               <p>
                 {window.used_percent == null ? "Usage unavailable" : percent(window.used_percent) + " used"} · limits
                 from {percent(window.threshold)}
@@ -38,7 +38,7 @@ function SubscriptionStatus({ account, names }: { account: AdminAccount; names: 
               {reset && <p>Resets {reset}</p>}
               {window.users.length ? (
                 <FairUseTable
-                  name={windowNames[window.id] + " users"}
+                  name={windowTitle(window) + " users"}
                   columns={["User", "Share", "Allowance", "Factor", "Status"]}
                 >
                   {window.users.map((user) => (

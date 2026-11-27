@@ -144,7 +144,7 @@ class Counters:
             pipe.execute()
 
     def trim(self, account, windows):
-        """Discard events that completed before both window starts."""
+        """Discard events that completed before the earliest reported window start."""
         oldest = min(w["reset_at"] - w["window_seconds"] for w in windows)
         self.retention[account] = max(1, math.ceil(max(w["window_seconds"] for w in windows))) + 86400
         key = self.journal_key(account)

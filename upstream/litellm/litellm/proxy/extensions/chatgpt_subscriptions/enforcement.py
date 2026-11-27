@@ -10,7 +10,7 @@ from .access import Caller, Grants
 from .admin import _credential_values, deployment_selector
 from .attribution import CredentialSnapshot
 from .fair_use import evaluate, quotas, response_headers
-from .fair_use_math import quota_state, utc, window_name
+from .fair_use_math import active_windows, quota_state, utc
 from .registry import Registry
 
 
@@ -31,7 +31,7 @@ class FairUseLimitExceeded(litellm.RateLimitError):
     def __init__(self, blocks):
         window, display = min(blocks, key=lambda block: block[0]["reset_at"])
         reset = window["reset_at"]
-        message = f"The {window_name(window)} fair-use limit for {display} resets at {utc(reset)}."
+        message = f"The {window['name']} fair-use limit for {display} resets at {utc(reset)}."
         super().__init__(message=message, llm_provider="chatgpt", model="subscription model",
                          headers={"Retry-After": str(max(0, math.ceil(reset - time.time())))})
         self.message = message
@@ -109,7 +109,7 @@ async def dispatch(logging_obj, credential):
     snapshot = quotas.snapshots.get(credential.subscription_id)
     if headers and quota_state(snapshot, time.time(), quotas.interval) == "current":
         logging_obj._subscription_headers_until = min(snapshot["fetched_at"] + 3 * quotas.interval,
-                                                       snapshot["primary"]["reset_at"], snapshot["secondary"]["reset_at"])
+                                                       *(snapshot[name]["reset_at"] for name in active_windows(snapshot)))
         logging_obj._subscription_fair_use_headers = headers
 
 
