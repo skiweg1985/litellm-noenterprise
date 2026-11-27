@@ -618,6 +618,23 @@ class LoginTests(unittest.TestCase):
         sensor = healthy.get("/chatgpt/accounts/default/usage/prtg?windows=primary", headers=headers).json()["prtg"]
         self.assertNotIn("error", sensor)
 
+    def test_monitoring_overview_names_each_subscription(self):
+        self.store(expires_in=30 * 86400)
+        accounts = Accounts([self.account()])
+        created = accounts.create("Team Abo")
+        good = {"model_name": "gpt-sub", "slug": "gpt-6-luna", "id": "dep-1", "account": "default",
+                "credential": "chatgpt-default", "problem": None}
+        client = self.client(accounts, deployments=[good])
+        overview = client.get("/chatgpt/accounts", headers={"X-Monitoring-Key": "monitor-secret"})
+        rows = {row["account"]: row for row in overview.json()["accounts"]}
+        records = accounts.registry.records()
+        self.assertTrue(created.name.startswith("sub_"))
+        self.assertEqual((rows[created.name]["display_name"], rows[created.name]["subscription_id"]),
+                         ("Team Abo", records[created.name]["subscription_id"]))
+        self.assertEqual((rows["default"]["display_name"], rows["default"]["subscription_id"]),
+                         ("default", records["default"]["subscription_id"]))
+        self.assertEqual(rows[created.name]["credentials"], [])
+
     def test_watcher_runs_every_subscription(self):
         started = []
 

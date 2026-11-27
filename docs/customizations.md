@@ -163,6 +163,9 @@ overrides at evaluation time. `attribution.py` records optional
 `fair_use_api.py` serves management and personal status. The existing
 `admin.py`, `expansion.py`, `policy.py`, `attribution.py`, `routes.py` and
 `service.py` supply selector resolution, routing, completion events and refresh.
+The monitoring overview in `routes.py` also returns `display_name` and
+`subscription_id`, so cost dashboards can match dashboard-created
+subscriptions (`sub_<hex>`) to spend-log attempts.
 
 Fair-use hooks in LiteLLM:
 

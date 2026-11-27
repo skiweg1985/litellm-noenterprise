@@ -18,9 +18,10 @@ OVERVIEW = "/chatgpt/accounts"
 PREFIX = OVERVIEW + "/{name}/usage"
 UNKNOWN = "Unknown ChatGPT account."
 PATHS = (OVERVIEW, PREFIX, PREFIX + "/prtg", admin.PAGE, admin.API, observed_usage.API)
-# Fields of an account that the monitoring key may see: no email, no ids.
-OVERVIEW_FIELDS = ("account", "state", "token_valid", "plan", "token_expires_at",
-                   "last_refresh_at", "refresh_rejected", "auto_login")
+# Fields of an account that the monitoring key may see: no email and no provider
+# account ids. subscription_id is the proxy's own id, also recorded in spend logs.
+OVERVIEW_FIELDS = ("account", "subscription_id", "display_name", "state", "token_valid", "plan",
+                   "token_expires_at", "last_refresh_at", "refresh_rejected", "auto_login")
 
 
 def configuration_text(found):

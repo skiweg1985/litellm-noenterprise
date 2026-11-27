@@ -303,7 +303,10 @@ backend Python environment used for the other scoped contracts.
 Monitoring is disabled unless `CHATGPT_MONITORING_API_KEY` is configured.
 Requests use `X-Monitoring-Key`; this key does not grant administration access.
 
-- `GET /chatgpt/accounts`: redacted status and quota overview.
+- `GET /chatgpt/accounts`: redacted status and quota overview. Each row has
+  the alias (`account`), `display_name` and `subscription_id`, the id that
+  spend logs record in `subscription_attempts`. It omits email addresses and
+  provider account ids.
 - `GET /chatgpt/accounts/{name}/usage`: account quota data.
 - `GET /chatgpt/accounts/{name}/usage/prtg`: generic PRTG channel response.
 
