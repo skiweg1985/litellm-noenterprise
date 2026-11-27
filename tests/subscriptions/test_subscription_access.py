@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 from litellm.proxy.extensions.chatgpt_subscriptions import access
 from litellm.proxy.extensions.chatgpt_subscriptions.access import Caller, Grants
 from litellm.proxy.extensions.chatgpt_subscriptions.registry import Registry
-from litellm.proxy.extensions.chatgpt_subscriptions.settings import Access, Factors, FairUse
+from litellm.proxy.extensions.chatgpt_subscriptions.settings import Access, Factors, FairUse, ModelWeights
 
 
 class RegistryMigrationTests(unittest.TestCase):
@@ -20,10 +20,13 @@ class RegistryMigrationTests(unittest.TestCase):
             v1 = dict(version=1, accounts={"seat": legacy})
             registry.path.write_text(json.dumps(v1))
             self.assertEqual(registry.records()["seat"]["fair_use"], FairUse().model_dump())
+            self.assertEqual(registry.read()["model_weights"], {})
             registry.seed(["seat"])
             self.assertEqual(json.loads(registry.path.read_text()), v1)
             factors = {"users": {"unknown": 0}, "teams": {"old": 2}}
             registry.update_settings("fair_use_factors", factors)
+            weights = {"future": {"input": 0.3, "output": 0.7}}
+            registry.update_settings("model_weights", weights)
             registry.rename("seat", "Renamed")
             registry.create("Another")
             saved = json.loads(registry.path.read_text())
@@ -31,7 +34,20 @@ class RegistryMigrationTests(unittest.TestCase):
             self.assertEqual(saved["accounts"]["seat"]["subscription_id"], "stable")
             self.assertEqual(saved["accounts"]["seat"]["access"], Access().model_dump())
             self.assertEqual(saved["fair_use_factors"], factors)
+            self.assertEqual(saved["model_weights"], weights)
             self.assertEqual(Registry().read(), saved)
+
+    def test_model_weight_validation(self):
+        for rule in ({"like": "one", "factor": 2}, {"factor": -1}, {"factor": 101}, {"factor": True},
+                     {"factor": "1"}, {"factor": float("nan")}, {"input": -1, "output": 1},
+                     {"input": 1}, {"input": 1, "output": 1, "cache_read": None},
+                     {"input": 1, "output": 1, "extra": 0}, {"input": 0, "output": float("inf")}):
+            with self.subTest(rule=rule), self.assertRaises(ValueError):
+                ModelWeights.model_validate({"future": rule})
+        for overrides in [{"one": {"like": "two"}, "two": {"like": "three"}}, {"one": {"like": "one"}},
+                          {"chatgpt/model": {"factor": 0}}, {"model": {"like": "openai/other"}}]:
+            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                ModelWeights.model_validate(overrides)
 
     def test_settings_validation(self):
         for model, value in [(Factors, {"users": {"u": v}}) for v in (-1, 10.01, True, "2", float("nan"))] + [

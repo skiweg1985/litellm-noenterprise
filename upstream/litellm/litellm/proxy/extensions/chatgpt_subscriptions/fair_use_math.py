@@ -31,17 +31,17 @@ def quota_state(snapshot, now, interval):
     return "current"
 
 
-def window_users(tokens, factors, used, threshold, enabled):
-    """tokens includes every observed identity and the current caller (possibly zero)."""
-    total = sum(tokens.values())
-    active = [factors.get(user, 1) for user in tokens if factors.get(user, 1) > 0]
+def window_users(measurements, factors, used, threshold, enabled):
+    """Each active identity has a (raw tokens, weighted consumption) measurement."""
+    total = math.fsum(consumption for _, consumption in measurements.values())
+    active = [factors.get(user, 1) for user in measurements if factors.get(user, 1) > 0]
     weight = math.fsum(active)
     users = {}
-    for user, count in tokens.items():
+    for user, (tokens, consumption) in measurements.items():
         factor = factors.get(user, 1)
-        share = count * used / total if total and used is not None else 0.0
+        share = (consumption / total) * used if total and used is not None else 0.0
         allowance = 100 * factor / weight if weight else 0.0
-        users[user] = dict(user_id=user, tokens=count, factor=factor, share=share, allowance=allowance,
+        users[user] = dict(user_id=user, tokens=tokens, consumption=consumption, factor=factor, share=share, allowance=allowance,
                            throttled=bool(enabled and used is not None and used >= threshold
                                           and factor > 0 and len(active) > 1 and share >= allowance))
     return users

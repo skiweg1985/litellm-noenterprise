@@ -14,22 +14,22 @@ except ModuleNotFoundError:
 
 class FairUseMathTests(unittest.TestCase):
     def test_threshold_and_share_are_inclusive(self):
-        tokens = {"heavy": 5, "light": 1}
+        usage = {"heavy": (5, 0.5), "light": (10, 0.1)}
         for used, expected in [(59, False), (60, True), (90, True)]:
-            users = math.window_users(tokens, {}, used, 60, True)
+            users = math.window_users(usage, {}, used, 60, True)
             self.assertIs(users["heavy"]["throttled"], expected)
             self.assertFalse(users["light"]["throttled"])
             self.assertEqual(users["heavy"]["allowance"], 50)
-        self.assertFalse(math.window_users(tokens, {}, 100, 60, False)["heavy"]["throttled"])
+        self.assertFalse(math.window_users(usage, {}, 100, 60, False)["heavy"]["throttled"])
 
     def test_active_zero_tokens_single_user_and_exempt_factor(self):
-        self.assertFalse(math.window_users({"solo": 10}, {}, 100, 1, True)["solo"]["throttled"])
-        users = math.window_users({"solo": 100, "exempt": 0}, {"exempt": 0}, 100, 1, True)
+        self.assertFalse(math.window_users({"solo": (10, 1.0)}, {}, 100, 1, True)["solo"]["throttled"])
+        users = math.window_users({"solo": (100, 1.0), "exempt": (0, 0.0)}, {"exempt": 0}, 100, 1, True)
         self.assertFalse(users["solo"]["throttled"])
         self.assertFalse(users["exempt"]["throttled"])
-        users = math.window_users({"a": 0, "b": 0}, {"a": 3}, 99, 60, True)
+        users = math.window_users({"a": (0, 0.0), "b": (0, 0.0)}, {"a": 3}, 99, 60, True)
         self.assertEqual((users["a"]["share"], users["a"]["allowance"]), (0, 75))
-        users = math.window_users({"a": 50, "b": 0, "free": 50}, {"free": 0}, 90, 60, True)
+        users = math.window_users({"a": (50, 0.5), "b": (0, 0.0), "free": (50, 0.5)}, {"free": 0}, 90, 60, True)
         self.assertEqual(users["a"]["share"], 45)
         self.assertFalse(users["free"]["throttled"])
 

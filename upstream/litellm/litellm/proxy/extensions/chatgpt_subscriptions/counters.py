@@ -13,6 +13,7 @@ from litellm.caching.dual_cache import DualCache
 
 from .access import key_identity, proxy_db
 from .fair_use_math import utc
+from .fair_use_weights import model_id
 
 # Deduplicate callback snapshots before counting. The indexed request interval
 # also admits requests that span the boundary. The attempt start decides membership.
@@ -30,8 +31,12 @@ ORDER BY a->>'attempt_id', (COALESCE(a->>'outcome', '') IN ('success', 'failure'
 """
 
 
+def _count(value):
+    return value if type(value) is int and value >= 0 else 0
+
+
 def event(attempt, user, team, request_started=None):
-    """Store gateway identity, timestamp and measured tokens only."""
+    """Capture measured token counts by upstream model without applying policy."""
     if not user:
         return None
     try:
@@ -41,9 +46,11 @@ def event(attempt, user, team, request_started=None):
     identifier = attempt.get("attempt_id")
     if started is None or not isinstance(identifier, str) or not identifier:
         return None
-    tokens = sum(v for v in (attempt.get("input_tokens"), attempt.get("output_tokens")) if type(v) is int and v >= 0)
+    inputs = _count(attempt.get("input_tokens"))
+    cached = min(inputs, _count(attempt.get("cached_input_tokens")))
+    counts = [inputs - cached, cached, _count(attempt.get("output_tokens"))]
     terminal = bool(attempt.get("ended_at")) or attempt.get("outcome") in ("success", "failure", "cancelled")
-    return [identifier, started, user, team, tokens, terminal]
+    return [identifier, started, user, team, model_id(attempt.get("model")), counts, terminal]
 
 
 @dataclass(repr=False)
@@ -64,15 +71,22 @@ class Window:
     def add(self, item):
         if not item:
             return
-        identifier, started, user, team, tokens, terminal = item
+        identifier, started, user, team, model, counts, terminal = item
         if not self.start <= started < self.reset:
             return
-        previous = self.seen.get(identifier)
-        if previous is not None and (previous[1] or not terminal):
-            return
-        self.seen[identifier] = (tokens, terminal)
-        row = self.users.setdefault(user, {"tokens": 0, "team": team, "started": started})
-        row["tokens"] += tokens - (previous[0] if previous else 0)
+        if identifier in self.seen:
+            previous = self.seen[identifier]
+            if previous is None or not terminal:
+                return
+            old_user, old_model, old_counts = previous
+            totals = self.users[old_user]["models"][old_model]
+            for index, count in enumerate(old_counts):
+                totals[index] -= count
+        self.seen[identifier] = None if terminal else (user, model, counts)
+        row = self.users.setdefault(user, {"models": {}, "team": team, "started": started})
+        totals = row["models"].setdefault(model, [0, 0, 0])
+        for index, count in enumerate(counts):
+            totals[index] += count
         if started >= row["started"]:
             row.update(team=team, started=started)
 
@@ -122,8 +136,10 @@ class Counters:
     def publish(self, redis, account, events):
         key = redis.check_and_fix_namespace(self.journal_key(account))
         with redis.redis_client.pipeline(transaction=False) as pipe:
-            for item in events:
-                pipe.xadd(key, {"event": json.dumps(item)})
+            for identifier, started, user, team, model, counts, terminal in events:
+                # Keep the original event readable by older workers during an upgrade.
+                event = [identifier, started, user, team, sum(counts), terminal]
+                pipe.xadd(key, {"event": json.dumps(event), "model_usage": json.dumps([model, counts])})
             pipe.expire(key, self.journal_ttl(account))
             pipe.execute()
 
@@ -157,7 +173,11 @@ class Counters:
             since = "(" + window.redis_cursor if window.redis_cursor else str(max(0, int(window.start * 1000)))
             rows = redis.redis_client.xrange(name, min=since)
             for cursor, fields in rows:
-                window.add(json.loads(fields.get("event") or fields[b"event"]))
+                identifier, started, user, team, total, terminal = json.loads(fields.get("event") or fields[b"event"])
+                usage = fields.get("model_usage") or fields.get(b"model_usage")
+                # Legacy streams contain only a raw total. Use reference input rates.
+                model, counts = json.loads(usage) if usage else (None, [total, 0, 0])
+                window.add([identifier, started, user, team, model, counts, terminal])
                 window.redis_cursor = cursor.decode() if isinstance(cursor, bytes) else cursor
         elif journal:
             offset = bisect.bisect_right(journal.times, window.local_cursor)
@@ -198,7 +218,8 @@ class Counters:
     def snapshot(self, account, window):
         with self.lock:
             self.updates(account, window)
-            return {user: row.copy() for user, row in window.users.items()}
+            return {user: {**row, "models": {model: counts.copy() for model, counts in row["models"].items()}}
+                    for user, row in window.users.items()}
 
 
 counters = Counters()

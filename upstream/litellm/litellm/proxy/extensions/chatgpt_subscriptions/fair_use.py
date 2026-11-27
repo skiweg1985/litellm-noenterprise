@@ -2,10 +2,13 @@
 import asyncio
 import time
 
+import litellm
+
 from .access import Caller, Grants
 from .accounts import _env_seconds
 from .counters import counters
 from .fair_use_math import WINDOWS, quota_state, utc, window_users
+from .fair_use_weights import ModelPricing
 from .service import UsageService
 
 
@@ -60,7 +63,7 @@ class Quotas:
 quotas = Quotas()
 
 
-async def evaluate(record, factors, caller=None):
+async def evaluate(record, factors, overrides, caller=None):
     """Return the same measurements for routing, admin status and the caller view."""
     account = record["subscription_id"]
     policy = record["fair_use"]
@@ -84,17 +87,18 @@ async def evaluate(record, factors, caller=None):
     if caller:
         active.append(caller)
     grants = await Grants.resolve([], factors, active)
+    pricing = ModelPricing(overrides, litellm.model_cost)
     windows = []
     for name, rows in counts.items():
         quota = snapshot[name] if state == "current" else {}
         used = quota.get("used_percent")
         threshold = policy[name + "_threshold"]
-        tokens = {user: row["tokens"] for user, row in rows.items()}
+        measurements = {user: pricing.measure(row["models"]) for user, row in rows.items()}
         weights = {user: grants.factor(identity) for user, identity in contexts[name].items()}
         if caller and caller.identity:
-            tokens.setdefault(caller.identity, 0)
+            measurements.setdefault(caller.identity, (0, 0.0))
             weights[caller.identity] = grants.factor(caller)
-        users = window_users(tokens, weights, used, threshold, policy["enabled"])
+        users = window_users(measurements, weights, used, threshold, policy["enabled"])
         windows.append(dict(id=name, threshold=threshold, used_percent=used, reset_at=quota.get("reset_at"),
                             window_seconds=quota.get("window_seconds"), scarce=used is not None and used >= threshold,
                             users=users))

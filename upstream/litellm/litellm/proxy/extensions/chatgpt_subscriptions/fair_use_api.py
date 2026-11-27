@@ -1,8 +1,11 @@
 """Administration of subscription grants and the authenticated caller's quota view."""
 import asyncio
 import json
+import sys
+import time
 from typing import Literal
 
+import litellm
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
@@ -11,8 +14,12 @@ from pydantic import BaseModel
 
 from .access import Caller, Grants
 from .admin import API, NO_STORE, litellm_admin
+from .counters import counters
+from .enforcement import is_chatgpt
 from .fair_use import evaluate, quotas
-from .settings import Access, Factors, FairUse
+from .fair_use_math import WINDOWS, quota_state
+from .fair_use_weights import ModelPricing, model_id
+from .settings import Access, Factors, FairUse, ModelWeights
 
 
 class UserShare(BaseModel):
@@ -20,6 +27,7 @@ class UserShare(BaseModel):
     allowance: float
     factor: float
     tokens: int
+    consumption: float
     throttled: bool
 
 
@@ -72,6 +80,41 @@ class PersonalStatus(BaseModel):
     accounts: list[PersonalAccount]
 
 
+class ModelWeightInfo(BaseModel):
+    model: str
+    input: float | None
+    output: float | None
+    cache_read: float | None
+    source: Literal["list", "like", "factor", "prices", "unpriced"]
+    weight: float
+    unpriced: bool
+
+
+class ModelWeightsStatus(BaseModel):
+    reference_model: str
+    reference_fallback: bool
+    overrides: ModelWeights
+    models: list[ModelWeightInfo]
+
+
+async def model_weights_status(overrides):
+    router = getattr(sys.modules.get("litellm.proxy.proxy_server"), "llm_router", None)
+    models = {model_id(row["litellm_params"].get("model")) for row in (router.model_list if router else [])
+              if is_chatgpt(row)}
+    now = time.time()
+    for account, snapshot in list(quotas.snapshots.items()):
+        if quota_state(snapshot, now, quotas.interval) == "unavailable":
+            continue
+        for name in WINDOWS:
+            # An older quota reading still identifies the window until its reset.
+            if snapshot[name]["reset_at"] > now:
+                users = await counters.counts(account, name, snapshot[name])
+                for row in users.values():
+                    models.update(row["models"])
+    models.discard(None)
+    return ModelPricing(overrides, litellm.model_cost).status(models)
+
+
 async def status(registry, caller=None):
     value = await asyncio.to_thread(registry.read)
     records = value["accounts"]
@@ -81,7 +124,7 @@ async def status(registry, caller=None):
     for alias, record in records.items():
         if caller and (record["retired"] or not grants.permits(record["access"], caller)):
             continue
-        state, windows = await evaluate(record, factors, caller)
+        state, windows = await evaluate(record, factors, value["model_weights"], caller)
         account = dict(display_name=record["display_name"], enabled=record["fair_use"]["enabled"], quota_state=state)
         if caller:
             own = []
@@ -136,6 +179,7 @@ def router(accounts, admin_dependency=None):
     api = APIRouter(tags=["ChatGPT fair use"], route_class=NoStoreRoute)
     admin = admin_dependency or litellm_admin()
     registry = accounts.registry
+    weights_path = "/chatgpt/api/fair-use/model-weights"
     factors_path = "/chatgpt/api/fair-use/factors"
 
     async def read(field, name=None):
@@ -153,7 +197,7 @@ def router(accounts, admin_dependency=None):
             raise HTTPException(404, "Unknown ChatGPT account.", headers=NO_STORE) from None
         except ValueError:
             raise HTTPException(409, "Subscription settings cannot be changed.", headers=NO_STORE) from None
-        await audit(name or "fair_use_factors", field, old, saved, auth)
+        await audit(name or field, field, old, saved, auth)
         return saved
 
     @api.get(API + "/{name}/access", response_model=Access)
@@ -179,6 +223,14 @@ def router(accounts, admin_dependency=None):
     @api.put(factors_path, response_model=Factors)
     async def set_factors(body: Factors, auth=Depends(admin)):
         return await write("fair_use_factors", body, auth)
+
+    @api.get(weights_path, response_model=ModelWeightsStatus)
+    async def get_model_weights(auth=Depends(admin)):
+        return await model_weights_status(await read("model_weights"))
+
+    @api.put(weights_path, response_model=ModelWeightsStatus)
+    async def set_model_weights(body: ModelWeights, auth=Depends(admin)):
+        return await model_weights_status(await write("model_weights", body, auth))
 
     @api.get("/chatgpt/api/fair-use/status", response_model=Status)
     async def admin_status(auth=Depends(admin)):

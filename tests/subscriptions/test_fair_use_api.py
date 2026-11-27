@@ -61,6 +61,50 @@ class FairUseApiTests(unittest.TestCase):
             self.assertEqual(self.client.get(self.first + "access").status_code, 200)
             self.assertEqual(audit.await_count, 3)
 
+    def test_model_weights_inventory_replacement_and_audit(self):
+        path = "/chatgpt/api/fair-use/model-weights"
+        overrides = {"future": {"like": "gpt-6-astra"}, "seen": {"input": 1, "output": 2}}
+        deployments = [
+            {"model_name": "parent", "model_info": {"subscription_assignment": {"mode": "fixed"}},
+             "litellm_params": {"model": "chatgpt/gpt-6-luna"}},
+            {"model_name": "configured", "litellm_params": {"model": "chatgpt/gpt-6-sol"}},
+            {"model_name": "unrelated", "litellm_params": {"model": "openai/gpt-4o"}},
+        ]
+        server = SimpleNamespace(llm_router=SimpleNamespace(model_list=deployments))
+        now = time.time()
+        window = {"reset_at": now + 60, "window_seconds": 3600, "used_percent": 60}
+        snapshot = {"fetched_at": now - 3600, "primary": {**window, "reset_at": now - 10}, "secondary": window}
+        counts = {"u": {"models": {"seen": [1, 0, 0], "counter-only": [0, 0, 0], None: [2, 0, 0]}}}
+        with patch.dict(sys.modules, {"litellm.proxy.proxy_server": server}), \
+             patch.dict(fair_use.quotas.snapshots, {"seat": snapshot}, clear=True), \
+             patch.object(fair_use_api.counters, "counts", AsyncMock(return_value=counts)) as read_counts, \
+             patch.object(fair_use_api, "audit", AsyncMock()) as audit:
+            written = self.client.put(path, json=overrides)
+            self.assertEqual(written.status_code, 200, written.text)
+            self.assertEqual(written.headers["cache-control"], "no-store")
+            read_counts.assert_awaited_once_with("seat", "secondary", window)
+            audit.assert_awaited_once_with("model_weights", "model_weights", {}, overrides, self.auth)
+            fetched = self.client.get(path)
+            self.assertEqual(fetched.headers["cache-control"], "no-store")
+            self.assertEqual(fetched.json(), written.json())
+            body = fetched.json()
+            self.assertEqual(set(body), {"reference_model", "reference_fallback", "overrides", "models"})
+            self.assertEqual(body["overrides"], overrides)
+            self.assertEqual(body["reference_model"], "gpt-6-sol")
+            self.assertFalse(body["reference_fallback"])
+            self.assertEqual([r["model"] for r in body["models"]],
+                             ["counter-only", "future", "gpt-6-luna", "gpt-6-sol", "seen"])
+            future = body["models"][1]
+            self.assertEqual(set(future), {"model", "input", "output", "cache_read", "source", "weight", "unpriced"})
+            self.assertEqual(future["source"], "like")
+            self.assertAlmostEqual(future["weight"], 5)
+            invalid = self.client.put(path, json={"one": {"like": "two"}, "two": {"like": "three"}})
+            self.assertEqual(invalid.status_code, 422)
+            self.assertEqual(invalid.headers["cache-control"], "no-store")
+            self.assertEqual(self.client.get(path).json(), body)
+            self.assertEqual(self.client.put(path, json={}).json()["overrides"], {})
+            self.assertEqual(audit.await_count, 2)
+
     def test_enabled_audit_writes_settings_to_the_native_table(self):
         import litellm
         create = AsyncMock()
@@ -87,20 +131,29 @@ class FairUseApiTests(unittest.TestCase):
 
     def test_non_admin_only_sees_own_shares_and_permitted_accounts(self):
         self.auth.user_role = "internal_user"
-        for path in [self.first + "access", self.first + "fair-use", "/chatgpt/api/fair-use/factors", "/chatgpt/api/fair-use/status"]:
+        for path in [self.first + "access", self.first + "fair-use", "/chatgpt/api/fair-use/factors",
+                     "/chatgpt/api/fair-use/model-weights", "/chatgpt/api/fair-use/status"]:
             denied = self.client.get(path)
             self.assertEqual(denied.status_code, 403)
             self.assertEqual(denied.headers["cache-control"], "no-store")
             if not path.endswith("status"):
-                self.assertEqual(self.client.put(path, json={}).status_code, 403)
+                denied = self.client.put(path, json={})
+                self.assertEqual(denied.status_code, 403)
+                self.assertEqual(denied.headers["cache-control"], "no-store")
         self.accounts.registry.update_settings("access", {"users": ["other-private-user"]}, "second")
         now = time.time()
         q = {"reset_at": now + 300, "window_seconds": 18000, "used_percent": 70}
         snapshot = dict(fetched_at=now, primary=q, secondary=q)
-        users = {"mine": {"tokens": 4, "team": None}, "other-private-user": {"tokens": 80, "team": None}}
+        users = {"mine": {"models": {"gpt-6-sol": [2, 1, 1]}, "team": None}, "other-private-user": {"models": {"gpt-6-sol": [80, 0, 0]}, "team": None}}
         with patch.dict(fair_use.quotas.snapshots, {self.records["first"]["subscription_id"]: snapshot}), \
              patch.object(fair_use.counters, "counts", AsyncMock(return_value=users)):
             response = self.client.get("/chatgpt/fair-use/me")
+            self.auth.user_role = "proxy_admin"
+            status = self.client.get("/chatgpt/api/fair-use/status")
+            first = next(row for row in status.json()["accounts"] if row["account"] == "first")
+            for window in first["windows"]:
+                mine = next(user for user in window["users"] if user["user_id"] == "mine")
+                self.assertAlmostEqual(mine["consumption"], 2 * 2e-6 + 2e-7 + 1e-5)
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(body["user_id"], "mine")
@@ -109,9 +162,11 @@ class FairUseApiTests(unittest.TestCase):
         self.assertNotIn("subscription_id", response.text)
         for w in body["accounts"][0]["windows"]:
             self.assertEqual(set(w), {"id", "scarce", "threshold", "used_percent", "reset_at", "tokens",
-                                      "factor", "share", "allowance", "throttled"})
+                                      "consumption", "factor", "share", "allowance", "throttled"})
             self.assertEqual(w["tokens"], 4)
-            self.assertAlmostEqual(w["share"], 4 / 84 * 70)
+            consumption = 2 * 2e-6 + 2e-7 + 1e-5
+            self.assertAlmostEqual(w["consumption"], consumption)
+            self.assertAlmostEqual(w["share"], consumption / (80 * 2e-6 + consumption) * 70)
 
     def test_listing_respects_grants_and_admin_management_view(self):
         self.accounts.registry.update_settings("access", {"teams": ["restricted-team"]}, "second")

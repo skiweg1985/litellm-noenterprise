@@ -20,6 +20,7 @@ class SubscriptionAttemptRecord(TypedDict):
     routing_mode: NotRequired[Literal["fixed", "priority", "distribution"] | None]
     reserve_switch: NotRequired[bool]
     input_tokens: int | None
+    cached_input_tokens: NotRequired[int | None]
     output_tokens: int | None
     error_code: NotRequired[str]
 

@@ -156,7 +156,10 @@ Issue #48 adds account grants and adaptive fair use. In the subscription package
 `settings.py` and `registry.py` validate and persist version 2 policies.
 `access.py` resolves identities and team memberships. `fair_use_math.py`,
 `fair_use.py` and `counters.py` evaluate quota windows and rebuild measured
-usage. `enforcement.py` filters deployments and checks dispatch.
+per-model token totals. `fair_use_weights.py` resolves list prices and registry
+overrides at evaluation time. `attribution.py` records optional
+`cached_input_tokens` in `types/proxy/subscription_attribution.py`.
+`enforcement.py` filters deployments and checks dispatch.
 `fair_use_api.py` serves management and personal status. The existing
 `admin.py`, `expansion.py`, `policy.py`, `attribution.py`, `routes.py` and
 `service.py` supply selector resolution, routing, completion events and refresh.

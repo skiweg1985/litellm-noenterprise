@@ -4,7 +4,7 @@ import uuid
 from pathlib import Path
 
 from . import tokens
-from .settings import Access, Factors, FairUse
+from .settings import Access, Factors, FairUse, ModelWeights
 
 
 class Registry:
@@ -26,6 +26,7 @@ class Registry:
                 record['access'] = Access.model_validate(record.get('access', {})).model_dump()
                 record['fair_use'] = FairUse.model_validate(record.get('fair_use', {})).model_dump()
             value['fair_use_factors'] = Factors.model_validate(value.get('fair_use_factors', {})).model_dump()
+            value['model_weights'] = ModelWeights.model_validate(value.get('model_weights', {})).model_dump()
         except (ValueError, AttributeError, TypeError):
             raise ValueError('Invalid subscription settings.') from None
         value['version'] = 2
@@ -36,15 +37,17 @@ class Registry:
 
     def write(self, records):
         # All writers hold lock_path. Preserve unrelated settings on lifecycle writes.
-        tokens.write({'version': 2, 'accounts': records,
-                      'fair_use_factors': self.read()['fair_use_factors']}, self.path)
+        value = self.read()
+        value['accounts'] = records
+        tokens.write(value, self.path)
 
     def update_settings(self, field, body, alias=None):
-        model = {'access': Access, 'fair_use': FairUse, 'fair_use_factors': Factors}[field]
+        model = {'access': Access, 'fair_use': FairUse, 'fair_use_factors': Factors,
+                 'model_weights': ModelWeights}[field]
         saved = model.model_validate(body).model_dump()
         with tokens.locked(self.lock_path):
             value = self.read()
-            target = value if field == 'fair_use_factors' else value['accounts'][alias]
+            target = value if field in ('fair_use_factors', 'model_weights') else value['accounts'][alias]
             if target.get('retired'):
                 raise ValueError('Retired subscriptions cannot be changed.')
             previous = target[field]

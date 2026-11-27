@@ -4819,7 +4819,8 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.image_generation(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            self._count_failed_call(model_name, e)
+            if model_name is not None:
+                self.fail_calls[model_name] += 1
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -4881,7 +4882,8 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.aimage_generation(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            self._count_failed_call(model_name, e)
+            if model_name is not None:
+                self.fail_calls[model_name] += 1
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -4963,7 +4965,8 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.atranscription(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            self._count_failed_call(model_name, e)
+            if model_name is not None:
+                self.fail_calls[model_name] += 1
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -5055,7 +5058,8 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.aspeech(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            self._count_failed_call(model_name, e)
+            if model_name is not None:
+                self.fail_calls[model_name] += 1
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -5113,7 +5117,8 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.arerank(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            self._count_failed_call(model_name, e)
+            if model_name is not None:
+                self.fail_calls[model_name] += 1
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -5227,7 +5232,8 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.atext_completion(model=%s)\x1b[31m Exception %s\x1b[0m", model, e)
-            self._count_failed_call(model, e)
+            if model is not None:
+                self.fail_calls[model] += 1
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -5296,7 +5302,8 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.aadapter_completion(model=%s)\x1b[31m Exception %s\x1b[0m", model, e)
-            self._count_failed_call(model, e)
+            if model is not None:
+                self.fail_calls[model] += 1
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -6281,7 +6288,8 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.embedding(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            self._count_failed_call(model_name, e)
+            if model_name is not None:
+                self.fail_calls[model_name] += 1
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -6346,7 +6354,8 @@ class Router:
             return response
         except Exception as e:
             verbose_router_logger.info("litellm.aembedding(model=%s)\x1b[31m Exception %s\x1b[0m", model_name, e)
-            self._count_failed_call(model_name, e)
+            if model_name is not None:
+                self.fail_calls[model_name] += 1
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -6491,7 +6500,8 @@ class Router:
             verbose_router_logger.exception(
                 "litellm.acreate_file(model=%s, %s)\x1b[31m Exception %s\x1b[0m", model, kwargs, e
             )
-            self._count_failed_call(model, e)
+            if model is not None:
+                self.fail_calls[model] += 1
             raise e
 
     #### VECTOR STORES API ####
@@ -6569,7 +6579,8 @@ class Router:
             verbose_router_logger.exception(
                 "litellm.avector_store_create(model=%s)\x1b[31m Exception %s\x1b[0m", model, e
             )
-            self._count_failed_call(model, e)
+            if model is not None:
+                self.fail_calls[model] += 1
             raise e
 
     def _override_vector_store_methods_for_router(self):
@@ -6663,7 +6674,8 @@ class Router:
             verbose_router_logger.exception(
                 "litellm._acreate_batch(model=%s, %s)\x1b[31m Exception %s\x1b[0m", model, kwargs, e
             )
-            self._count_failed_call(model, e)
+            if model is not None:
+                self.fail_calls[model] += 1
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 
@@ -6867,7 +6879,8 @@ class Router:
             verbose_router_logger.exception(
                 "litellm._acancel_batch(model=%s, %s)\x1b[31m Exception %s\x1b[0m", model, kwargs, e
             )
-            self._count_failed_call(model, e)
+            if model is not None:
+                self.fail_calls[model] += 1
             self._stamp_retry_skip_deployment_id(e, kwargs)
             raise e
 

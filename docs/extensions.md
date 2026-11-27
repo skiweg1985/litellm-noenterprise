@@ -177,12 +177,28 @@ Fair use defaults to enabled. The primary window becomes scarce at 60% used
 and the weekly window at 80%. Read or replace these settings with
 `GET` or `PUT /chatgpt/api/accounts/{name}/fair-use`. The fields are
 `enabled`, `primary_threshold` and `secondary_threshold`. Thresholds accept
-integers from 1 through 100. The first registry write upgrades version 1
-and preserves account IDs, grants and connection history.
+integers from 1 through 100. Back up `CHATGPT_TOKEN_DIR` (registry and tokens)
+before upgrading. The first registry write saves version 2, which images
+without this feature cannot read. Restore the backup to roll back.
 
 Each window starts at its reset time minus its duration. A user's share is
-their fraction of observed input and output tokens multiplied by the provider's
-used percentage. Their allowance is 100 times their factor divided by the sum
+their fraction of price-weighted consumption multiplied by the provider's
+used percentage. Each attempt weights uncached input, cached input and output
+at the upstream model's LiteLLM rates. Missing cache counts or rates use the
+input rate. Status reports both raw tokens and consumption in fair-use units.
+Consumption is independent of spend.
+
+Administrators can read or replace overrides with
+`GET` or `PUT /chatgpt/api/fair-use/model-weights`. Use upstream model IDs.
+Set `like` to inherit another model's effective rates (one level), `factor`
+to scale the reference rates (0–100), or `input` and `output` with optional
+`cache_read` to set per-token rates. Changes apply to the whole current window.
+Unpriced models use the list rates of `CHATGPT_FAIR_USE_REFERENCE_MODEL`
+(default `gpt-6-sol`) and are flagged in model-weight status. If the reference
+has no usable price, status reports `reference_fallback` and the proxy uses
+2e-6 for input, 1e-5 for output and 2e-7 for cache reads.
+
+A user's allowance is 100 times their factor divided by the sum
 of active users' factors. An attempt without usage counts toward activity
 with zero tokens. Both calculations include the current caller. A user without
 a user ID is counted under `key:` followed by the key hash.

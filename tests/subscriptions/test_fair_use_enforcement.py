@@ -1,20 +1,19 @@
+import json
 import os
 import tempfile
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import litellm
 from litellm.proxy._types import ProxyException, UserAPIKeyAuth
-from litellm.proxy.common_request_processing import ProxyBaseLLMRequestProcessing
 from litellm.proxy.extensions.chatgpt_subscriptions import access, counters, enforcement, fair_use
 from litellm.proxy.extensions.chatgpt_subscriptions.accounts import Accounts
 from litellm.proxy.extensions.chatgpt_subscriptions.attribution import CredentialSnapshot, begin
 from litellm.proxy.extensions.chatgpt_subscriptions.expansion import expand_candidates, MEMBER
 from litellm.proxy.extensions.chatgpt_subscriptions.fair_use_math import utc
 from litellm.proxy.extensions.chatgpt_subscriptions.policy import record_failure
-from litellm.proxy.route_llm_request import _raise_if_model_fully_blocked
 from litellm.router_utils.cooldown_handlers import set_cooldown_deployments
 
 
@@ -58,7 +57,7 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
             "secondary": dict(used_percent=secondary, window_seconds=604800, reset_at=self.now + 2 * delay),
         }
         for user, count in (("heavy", 90), ("light", 10)):
-            self.store.record(self.ids[alias], [user, self.now, user, None, count, True])
+            self.store.record(self.ids[alias], [user, self.now, user, None, "test", [count, 0, 0], True])
 
     async def test_modes_order_equal_distribution_and_denial_precedence(self):
         self.registry.update_settings("access", {"users": ["other"]}, "b")
@@ -79,6 +78,8 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
             await expand_candidates(self.router, [self.parent("distribution")], self.data)
 
     async def test_config_precheck_candidates_and_actual_dispatch(self):
+        from litellm.proxy.route_llm_request import _raise_if_model_fully_blocked
+
         self.quota("a", 90, 5)
         self.registry.update_settings("access", {"users": ["other"]}, "b")
         direct = {"model_name": "public", "litellm_params": {"model": "chatgpt/test", "api_key": "chatgpt-account:a"}}
@@ -110,6 +111,8 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(router.fail_calls.values()))
 
     async def test_dispatched_headers_and_count_on_finish_only_once(self):
+        from litellm.proxy.common_request_processing import ProxyBaseLLMRequestProcessing
+
         self.quota("a", 90, 5)
         logger = SimpleNamespace(model_call_details={"litellm_params": {"litellm_metadata": {"user_api_key_user_id": "light"}}})
         credential = CredentialSnapshot(self.ids["a"], "A", None)
@@ -123,7 +126,7 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
         attempt.finish("success", {"usage": {"input_tokens": 7, "output_tokens": 3}})
         attempt.finish("failure")
         window = fair_use.quotas.snapshots[self.ids["a"]]["primary"]
-        self.assertEqual((await self.store.counts(self.ids["a"], "primary", window))["light"]["tokens"], 20)
+        self.assertEqual((await self.store.counts(self.ids["a"], "primary", window))["light"]["models"], {"test": [17, 0, 3]})
         self.registry.update_settings("fair_use", {"enabled": False}, "a")
         await enforcement.dispatch(logger, credential)
         self.assertEqual(logger._subscription_fair_use_headers, {})
@@ -132,7 +135,44 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
         await enforcement.dispatch(logger, credential)
         self.assertEqual(logger._subscription_fair_use_headers, {})
 
+    async def test_override_reprices_existing_window(self):
+        self.quota("a", 90, 0)
+        self.store.record(self.ids["a"], ["expensive", self.now, "light", None, "future", [5, 0, 0], True])
+
+        async def shares():
+            settings = self.registry.read()
+            _, windows = await fair_use.evaluate(settings["accounts"]["a"], settings["fair_use_factors"],
+                                                  settings["model_weights"])
+            return windows[0]["users"]
+
+        before = await shares()
+        self.registry.update_settings("model_weights", {"future": {"factor": 100}})
+        after = await shares()
+        self.assertTrue(before["heavy"]["throttled"])
+        self.assertTrue(after["light"]["throttled"])
+        self.assertFalse(after["heavy"]["throttled"])
+        self.assertEqual(before["light"]["tokens"], after["light"]["tokens"])
+        self.assertGreater(after["light"]["consumption"], before["light"]["consumption"])
+
+    def test_cached_input_attribution(self):
+        from litellm.types.llms.openai import ResponseAPIUsage
+
+        logger = SimpleNamespace(model_call_details={})
+        for usage, count in [
+            ({"input_tokens": 8, "input_tokens_details": {"cached_tokens": 3}}, 3),
+            ({"prompt_tokens": 8, "prompt_tokens_details": {"cached_tokens": 0}}, 0),
+            ({"input_tokens": 8}, None),
+            (ResponseAPIUsage(input_tokens=8, output_tokens=2, total_tokens=10,
+                              input_tokens_details={"text_tokens": 8}), None),
+        ]:
+            with self.subTest(usage=usage):
+                attempt = begin(logger, CredentialSnapshot(self.ids["a"], "A", None), "model")
+                attempt.finish("success", {"usage": usage})
+                self.assertEqual(attempt.value["cached_input_tokens"], count)
+
     async def test_openai_error_mapping_and_router_skips_health_and_retries(self):
+        from litellm.proxy.common_request_processing import ProxyBaseLLMRequestProcessing
+
         router = litellm.Router(model_list=[{"model_name": "test", "litellm_params": {"model": "openai/gpt-4o", "api_key": "synthetic"}}],
                                 num_retries=4, fallbacks=[{"test": ["backup"]}])
         self.addCleanup(router.discard)
@@ -181,27 +221,43 @@ class EnforcementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await monitoring.get())["limits"][0]["primary"]["used_percent"], 10)
         self.assertEqual(payloads, [])
 
+    def test_redis_stream_preserves_old_and_new_token_measurements(self):
+        redis = Mock()
+        pipe = Mock()
+        redis.redis_client.pipeline.return_value = MagicMock()
+        redis.redis_client.pipeline.return_value.__enter__.return_value = pipe
+        self.enter(patch.object(self.store, "redis", return_value=redis))
+        self.store.record("seat", ["new", self.now, "user", "t", "sol", [1, 2, 3], True])
+        fields = pipe.xadd.call_args.args[1]
+        self.assertEqual(json.loads(fields["event"]), ["new", self.now, "user", "t", 6, True])
+        legacy = {b"event": json.dumps(["old", self.now, "user", "t", 4, True]).encode()}
+        redis.redis_client.xrange.return_value = [(b"1-0", legacy), ("2-0", fields)]
+        window = counters.Window(self.now - 60, self.now + 60)
+        snapshot = self.store.snapshot("seat", window)
+        self.assertEqual(snapshot["user"]["models"], {None: [4, 0, 0], "sol": [1, 2, 3]})
+
     async def test_history_rebuild_deduplicates_live_and_callback_snapshots(self):
-        def row(identifier, started, count, ended=True, user="heavy"):
+        def row(identifier, started, count, ended=True, user="heavy", **fields):
             return {"user": user, "team_id": "t", "api_key": "a" * 64, "a": {
                 "attempt_id": identifier, "started_at": utc(started), "ended_at": utc(self.now) if ended else None,
-                "input_tokens": count, "output_tokens": None}}
-        rows = [row("old", self.now - 5000, 500), row("one", self.now, None, False),
-                row("one", self.now, 12), row("one", self.now, 12), row("two", self.now, None, user=None)]
+                "input_tokens": count, "output_tokens": None, **fields}}
+        rows = [row("old", self.now - 5000, 500), row("one", self.now, 5, False, model="chatgpt/sol"),
+                row("one", self.now, 12, model="openai/sol", cached_input_tokens=3, output_tokens=2),
+                row("one", self.now, 12), row("two", self.now, None, user=None)]
         legacy = row("legacy", self.now, 5, user="early")
         legacy["a"]["started_at"] = None
         legacy["request_started"] = self.now
         rows.append(legacy)
         query = AsyncMock(return_value=rows)
         self.enter(patch.object(counters, "proxy_db", return_value=SimpleNamespace(db=SimpleNamespace(query_raw=query))))
-        self.store.record("seat", ["one", self.now, "heavy", "t", 12, True])
-        self.store.record("seat", ["three", self.now, "heavy", "t", 8, True])
+        self.store.record("seat", ["one", self.now, "heavy", "t", "sol", [9, 3, 2], True])
+        self.store.record("seat", ["three", self.now, "heavy", "t", "astra", [2, 6, 0], True])
         window = {"reset_at": self.now + 100, "window_seconds": 1000}
         for _ in range(2):
             counts = await self.store.counts("seat", "primary", window)
-            self.assertEqual(counts["heavy"]["tokens"], 20)
-            self.assertEqual(counts["early"]["tokens"], 5)
-            self.assertEqual(counts["key:" + "a"*64]["tokens"], 0)
+            self.assertEqual(counts["heavy"]["models"], {"sol": [9, 3, 2], "astra": [2, 6, 0]})
+            self.assertEqual(counts["early"]["models"], {None: [5, 0, 0]})
+            self.assertEqual(counts["key:" + "a"*64]["models"], {None: [0, 0, 0]})
         query.assert_awaited_once()
         await self.store.counts("seat", "primary", {**window, "reset_at": window["reset_at"] + 30})
         self.assertEqual(query.await_count, 2)

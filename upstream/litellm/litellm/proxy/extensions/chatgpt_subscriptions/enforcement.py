@@ -70,7 +70,7 @@ async def decisions(registry, aliases, caller, eligible=None):
                 or quota_state(snapshot, time.time(), quotas.interval) != "current"):
             allowed[alias] = {}
             continue
-        state, windows = await evaluate(record, factors, caller)
+        state, windows = await evaluate(record, factors, registry["model_weights"], caller)
         blocking = [w for w in windows if w["users"][caller.identity]["throttled"]]
         if blocking:
             blocks.extend((w, record["display_name"]) for w in blocking)

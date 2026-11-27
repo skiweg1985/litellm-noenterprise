@@ -9,6 +9,26 @@ import test_subscription_distribution as distribution
 class SubscriptionFairUseTests(models.SubscriptionModelTests):
     create_distribution = distribution.SubscriptionDistributionTests.create_distribution
 
+    def wait_for_quota(self, seats, labels, auth):
+        now = int(time.time())
+        windows = {"allowed": True, "primary_window": {"limit_window_seconds": 18000, "used_percent": 90,
+                                                       "reset_at": now + 1800},
+                   "secondary_window": {"limit_window_seconds": 604800, "used_percent": 10, "reset_at": now + 86400}}
+        self.control(quota_by_identity={seat: windows for seat in seats})
+        self.addCleanup(self.control, quota_by_identity={})
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            response = self.client.get("/chatgpt/fair-use/me", headers=auth)
+            response.raise_for_status()
+            observed = [r for r in response.json()["accounts"] if r["display_name"] in labels]
+            if len(observed) == len(labels) and all(
+                r["quota_state"] == "current" and r["windows"][0]["used_percent"] == 90 for r in observed
+            ):
+                break
+            time.sleep(1)
+        else:
+            self.fail("Fair-use refresher did not observe the fixture windows")
+
     def test_routing_changes_only_for_the_caller_over_share(self):
         suffix = uuid.uuid4().hex[:6]
         first, seat1 = self.connect("FairUseFirst" + suffix)
@@ -42,22 +62,7 @@ class SubscriptionFairUseTests(models.SubscriptionModelTests):
             return self.client.post("/v1/chat/completions", headers=key, json={"model": model,
                 "messages": [{"role": "user", "content": uuid.uuid4().hex}], **extra})
 
-        now = int(time.time())
-        windows = {"allowed": True, "primary_window": {"limit_window_seconds": 18000, "used_percent": 90,
-                                                       "reset_at": now + 1800},
-                   "secondary_window": {"limit_window_seconds": 604800, "used_percent": 10, "reset_at": now + 86400}}
-        self.control(quota_by_identity={seat1: windows, seat2: windows})
-        self.addCleanup(self.control, quota_by_identity={})
-        deadline = time.monotonic() + 90
-        while time.monotonic() < deadline:
-            response = self.client.get("/chatgpt/fair-use/me", headers=a)
-            response.raise_for_status()
-            observed = [r for r in response.json()["accounts"] if r["display_name"] in (first["display_name"], second["display_name"])]
-            if len(observed) == 2 and all(r["quota_state"] == "current" and r["windows"][0]["used_percent"] == 90 for r in observed):
-                break
-            time.sleep(1)
-        else:
-            self.fail("Fair-use refresher did not observe the fixture windows")
+        self.wait_for_quota([seat1, seat2], [first["display_name"], second["display_name"]], a)
 
         for _ in range(3):
             call(a, fixed).raise_for_status()
@@ -84,6 +89,36 @@ class SubscriptionFairUseTests(models.SubscriptionModelTests):
             self.assertIn("x-litellm-fair-use-share", streamed.headers)
             self.assertIn("x-litellm-fair-use-allowance", streamed.headers)
             self.assertIn(b"[DONE]", streamed.read())
+
+    def test_more_raw_tokens_on_a_cheaper_model_consume_less(self):
+        self.addCleanup(self.control, models_by_identity={})
+        label = "Weighted" + uuid.uuid4().hex[:8]
+        account, seat = self.connect(label, ["gpt-6-luna", "gpt-6-astra"])
+        calls = []
+        for slug in ["gpt-6-luna", "gpt-6-astra"]:
+            model, created = self.create(account, slug)
+            created.raise_for_status()
+            user = "weighted-" + uuid.uuid4().hex
+            self.client.post("/user/new", json={"user_id": user, "user_role": "internal_user"}).raise_for_status()
+            key = self.client.post("/key/generate", json={"user_id": user, "models": [model]})
+            key.raise_for_status()
+            calls.append((model, {"Authorization": "Bearer " + key.json()["key"]}))
+        self.wait_for_quota([seat], [label], calls[0][1])
+        for model, auth in [calls[0], calls[0], calls[1]]:
+            self.client.post("/v1/chat/completions", headers=auth, json={"model": model,
+                "messages": [{"role": "user", "content": uuid.uuid4().hex}]}).raise_for_status()
+        windows = []
+        for _, auth in calls:
+            response = self.client.get("/chatgpt/fair-use/me", headers=auth)
+            response.raise_for_status()
+            row = next(r for r in response.json()["accounts"] if r["display_name"] == label)
+            windows.append(row["windows"][0])
+        cheap, expensive = windows
+        self.assertGreater(cheap["tokens"], expensive["tokens"])
+        self.assertLess(cheap["consumption"], expensive["consumption"])
+        self.assertLess(cheap["share"], expensive["share"])
+        self.assertFalse(cheap["throttled"])
+        self.assertTrue(expensive["throttled"])
 
 
 for _name in models.SubscriptionModelTests.__dict__:
