@@ -53,8 +53,15 @@ vi.mock("@/components/UserBanner", () => ({
   UserBanner: () => null,
 }));
 
-vi.mock("@/components/UpgradeBanner", () => ({
-  UpgradeBanner: () => null,
+// GitHub reports a newer upstream release; the dashboard must still show no upgrade banner.
+vi.mock("@/app/(dashboard)/hooks/latestRelease/useLatestReleaseInfo", () => ({
+  useLatestReleaseInfo: () => ({
+    data: { version: "99.0.0", new_features: 1, bug_fixes: 1, other_updates: 1, release_url: "https://example.test" },
+  }),
+}));
+
+vi.mock("@/app/(dashboard)/hooks/healthReadiness/useHealthReadinessDetails", () => ({
+  useHealthReadinessDetails: () => ({ data: { litellm_version: "1.106.6" } }),
 }));
 
 vi.mock("@/contexts/ThemeContext", () => ({
@@ -112,6 +119,21 @@ describe("(dashboard) Layout", () => {
     expect(within(navigation).getByRole("button", { name: "Close navigation" })).toBeInTheDocument();
     fireEvent.click(within(navigation).getByRole("link", { name: "Settings" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Navigation" })).not.toBeInTheDocument());
+  });
+
+  it("shows no upstream upgrade banner, even when a newer release exists", async () => {
+    render(
+      <AuthProvider>
+        <Layout>
+          <p>Gateway content</p>
+        </Layout>
+      </AuthProvider>,
+    );
+    pendingUiConfig.resolve();
+
+    expect(await screen.findByText("Gateway content")).toBeInTheDocument();
+    expect(screen.queryByText(/The latest version is/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/v99\.0\.0/)).not.toBeInTheDocument();
   });
 
   it("closes the mobile drawer when navigation changes outside the drawer", async () => {
