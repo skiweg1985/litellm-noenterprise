@@ -133,8 +133,8 @@ async def current_parent(parent):
     if row is None or not reaches(parent["model_name"], row.model_name):
         raise unavailable("This model changed or was removed. Refresh the model list.")
     params = _params(row.litellm_params)
-    # A routing group assigns its own priority to the member it re-emits.
-    if parent["model_name"] != row.model_name and (parent.get("litellm_params") or {}).get("order") is not None:
+    # A routing group assigns its own priority to the member it hands out.
+    if (parent.get("litellm_params") or {}).get("order") is not None:
         params["order"] = parent["litellm_params"]["order"]
     return {
         "model_name": parent["model_name"],
@@ -217,11 +217,24 @@ async def expand_candidates(router, candidates, request_kwargs=None):
         return await filter_config(candidates, request_kwargs)
     if len(parents) == 1:
         return await _expand_parent(router, parents[0], request_kwargs, alone=True)
-    if len({p["model_name"] for p in parents}) != 1 or _routing_group(router, parents[0]["model_name"]) is None:
+    if not _one_routing_group(router, parents):
         raise unavailable(
             "This subscription model has conflicting deployments. Use a unique public model name."
         )
     return await _expand_group(router, parents, request_kwargs)
+
+
+def _one_routing_group(router, parents):
+    """Whether the candidates are the members of one routing group.
+
+    Priority groups hand out members under their own names with the group's
+    order; other groups re-emit them under the group name.
+    """
+    names = {p["model_name"] for p in parents}
+    for group in (getattr(router, "routing_groups", None) or {}).values():
+        if names <= set(group.models) or names == {group.group_name}:
+            return True
+    return False
 
 
 async def _expand_group(router, parents, request_kwargs):

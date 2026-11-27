@@ -88,9 +88,9 @@ class RoutingGroupTests(unittest.IsolatedAsyncioTestCase):
         for name in ("sol-sub", "sol-sub2", "sol"):
             parent = await current_parent(self.copy(name, order=1))
             self.assertEqual(parent["model_name"], name)
-        # Only a re-emitted member carries the group's priority; the model's own row is authoritative otherwise.
+        # A group's priority on the handed-out copy survives the refresh from the database.
         self.assertEqual((await current_parent(self.copy("sol", order=2)))["litellm_params"]["order"], 2)
-        self.assertNotIn("order", (await current_parent(self.copy("sol-sub", order=2)))["litellm_params"])
+        self.assertNotIn("order", (await current_parent(self.copy("sol-sub")))["litellm_params"])
 
     async def test_renamed_or_removed_parent_is_rejected(self):
         self.group()
@@ -135,3 +135,15 @@ class RoutingGroupTests(unittest.IsolatedAsyncioTestCase):
     async def test_retry_policy_leaves_groups_to_native_routing(self):
         self.group({"sol-sub": 1, "sol-azure": 2})
         self.assertIsNone(await retry_policy(self.router, "sol", dict(self.data)))
+
+    async def test_priority_group_candidates_from_the_router(self):
+        self.group({"sol-sub": 1, "sol-azure": 2})
+        _, candidates = self.router._common_checks_available_deployment(model="sol", request_kwargs={})
+        result = await expand_candidates(self.router, candidates, dict(self.data))
+        members = [r for r in result if r["model_info"].get(MEMBER)]
+        self.assertEqual(len(members), len(self.ids))
+        self.assertEqual({m["litellm_params"]["order"] for m in members}, {1})
+        self.assertEqual([r["model_info"]["id"] for r in result if not r["model_info"].get(MEMBER)], ["azure"])
+        self.assertEqual(litellm.utils.get_order_filtered_deployments(result, target_order=None), members)
+        self.assertEqual([r["model_info"]["id"] for r in
+                          litellm.utils.get_order_filtered_deployments(result, target_order=2)], ["azure"])
