@@ -47,6 +47,7 @@ test files.
 | [Azure Realtime Translate](#azure-realtime-translate)                                           | #38, #40      | [extensions.md](extensions.md#translate-speech-with-azure-realtime-translate) |
 | [Nova Sonic voice sessions on Bedrock](#nova-sonic-on-bedrock)                                  | #45           | [extensions.md](extensions.md#talk-to-nova-sonic-on-bedrock)                  |
 | [Dashboard fixes](#dashboard-fixes)                                                             | #41           | —                                                                             |
+| [Startup banner](#startup-banner)                                                               | #55           | —                                                                             |
 
 Pull request numbers refer to
 [skiweg1985/litellm-noenterprise](https://github.com/skiweg1985/litellm-noenterprise/pulls?q=is%3Apr+is%3Amerged).
@@ -278,6 +279,13 @@ Introduced in #45 (spec #44).
   fill the viewport only from the `md` breakpoint. On phones, the toolbar,
   banners and pagination collapsed the rows behind the sticky header; there the
   table now keeps its natural height and the page scrolls.
+
+## Startup banner
+
+- #55: `proxy/common_utils/banner.py` adds the subtitle line
+  `noenterprise · sudo-ai.de` below the LiteLLM logo. The line is as wide as
+  the logo. The proxy prints the banner at startup, the `litellm-proxy` CLI
+  shell shows it, and the CLI SSO success page embeds it.
 
 ## Planned removals
 
